@@ -1,3 +1,4 @@
+
 package com.mtracker.app
 
 import androidx.compose.foundation.background
@@ -160,7 +161,9 @@ fun TxnRow(t: Txn, names: Map<Long, String>, onClick: () -> Unit, onDelete: () -
         if (it == SwipeToDismissBoxValue.EndToStart) { onDelete(); true } else false
     })
     SwipeToDismissBox(
-        state, modifier, enableDismissFromStartToEnd = false,
+        state = state,
+        modifier = modifier,
+        enableDismissFromStartToEnd = false,
         backgroundContent = {
             Box(Modifier.fillMaxSize().background(L.red.copy(alpha = 0.15f)).padding(end = 24.dp), contentAlignment = Alignment.CenterEnd) {
                 Cap("Delete", color = L.red)
