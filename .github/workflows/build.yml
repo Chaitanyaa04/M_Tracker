@@ -1,3 +1,4 @@
+
 name: Build M_Tracker APK
 
 on:
@@ -9,8 +10,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # true when you've added the signing secrets (recommended); otherwise a debug APK is built
+      # Debug APK is built until signing secrets are configured
       HAS_KEY: ${{ secrets.KEYSTORE_B64 != '' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -39,13 +41,15 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleStandardRelease --no-daemon
+        working-directory: ./M_Tracker
 
       - name: Build debug APK (no signing key set yet)
         if: env.HAS_KEY != 'true'
         run: gradle assembleStandardDebug --no-daemon
+        working-directory: ./M_Tracker
 
       - uses: actions/upload-artifact@v4
         with:
           name: M_Tracker-apk
-          path: app/build/outputs/apk/**/*.apk
+          path: M_Tracker/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
