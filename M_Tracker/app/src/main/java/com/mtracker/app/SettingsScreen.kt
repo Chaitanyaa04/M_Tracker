@@ -10,11 +10,35 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.foundation.lazy.items as lazyItems
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.Help
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Label
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Today
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Text
@@ -37,8 +61,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun SettingsScreen(vm: MainViewModel, onMsg: (String) -> Unit, modifier: Modifier = Modifier) {
-    var page by rememberSaveable { mutableStateOf("home") }
+fun SettingsScreen(vm: MainViewModel, onMsg: (String) -> Unit, modifier: Modifier = Modifier, startPage: String = "home") {
+    var page by rememberSaveable(startPage) { mutableStateOf(startPage) }
     BackHandler(page != "home") { page = "home" }
     val back = { page = "home" }
     Box(modifier.fillMaxSize()) {
@@ -51,6 +75,7 @@ fun SettingsScreen(vm: MainViewModel, onMsg: (String) -> Unit, modifier: Modifie
             "categories" -> CategoriesPage(vm, back)
             "recurring" -> RecurringPage(vm, back)
             "data" -> DataPage(vm, onMsg, back)
+            "updates" -> UpdatesPage(vm, back)
             "help" -> HelpPage(back)
             else -> AboutPage(back)
         }
@@ -73,36 +98,58 @@ private fun SubPage(title: String, onBack: () -> Unit, content: LazyListScope.()
 }
 
 @Composable
-private fun NavRow(title: String, sub: String, onClick: () -> Unit) {
+private fun NavRow(title: String, sub: String, icon: ImageVector, last: Boolean, onClick: () -> Unit) {
     Column(Modifier.clickable(onClick = onClick)) {
-        Row(Modifier.fillMaxWidth().padding(24.dp, 15.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(16.dp, 13.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(L.text.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = L.text, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, color = L.text, fontSize = 16.sp)
-                Spacer(Modifier.height(2.dp))
+                Text(title, color = L.text, fontSize = 15.sp)
                 Text(sub, color = L.muted, fontSize = 12.sp)
             }
             Text("›", color = L.muted, fontSize = 22.sp)
         }
-        Hairline()
+        if (!last) Hairline(Modifier.padding(start = 68.dp))
     }
 }
 
 @Composable
 private fun SettingsHome(go: (String) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 48.dp)) {
-        item { Cap("Personalise", Modifier.padding(24.dp, 20.dp, 24.dp, 4.dp)) }
-        item { NavRow("Appearance", "Theme, balances, haptics") { go("appearance") } }
-        item { NavRow("Security & privacy", "App lock, hide in recents") { go("security") } }
-        item { Cap("Capture", Modifier.padding(24.dp, 24.dp, 24.dp, 4.dp)) }
-        item { NavRow("Reminders & detection", "Payment apps, delay, permissions") { go("reminders") } }
-        item { NavRow("Daily habits", "Evening check-in, quick-add shortcut") { go("habits") } }
-        item { NavRow("Categories", "Add or remove your categories") { go("categories") } }
-        item { NavRow("Repeating transactions", "Rent, subscriptions, SIPs") { go("recurring") } }
-        item { Cap("Your data", Modifier.padding(24.dp, 24.dp, 24.dp, 4.dp)) }
-        item { NavRow("Backup, export & import", "Auto-backup folder, CSV, restore") { go("data") } }
-        item { Cap("Support", Modifier.padding(24.dp, 24.dp, 24.dp, 4.dp)) }
-        item { NavRow("Install & permission help", "Play Protect, “restricted setting”, usage access") { go("help") } }
-        item { NavRow("About M_Tracker", "Version, privacy promise") { go("about") } }
+    val latest by AppPrefs.get(androidx.compose.ui.platform.LocalContext.current).latestTag.collectAsState()
+    val hasUpdate = latest.isNotBlank() && Updater.isNewer(latest, BuildConfig.VERSION_NAME)
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 110.dp)) {
+        item { Cap("Make it yours", Modifier.padding(24.dp, 12.dp, 24.dp, 8.dp)) }
+        item {
+            Panel(Modifier.padding(horizontal = 16.dp)) {
+                NavRow("Appearance", "Theme, balances, haptics", Icons.Rounded.Palette, false) { go("appearance") }
+                NavRow("Security & privacy", "App lock, hide in recents", Icons.Rounded.Lock, true) { go("security") }
+            }
+        }
+        item { Cap("Capture", Modifier.padding(24.dp, 24.dp, 24.dp, 8.dp)) }
+        item {
+            Panel(Modifier.padding(horizontal = 16.dp)) {
+                NavRow("Payment reminders", "Which apps, how quietly", Icons.Rounded.Notifications, false) { go("reminders") }
+                NavRow("Daily habits", "Evening check-in", Icons.Rounded.Today, false) { go("habits") }
+                NavRow("Heads & icons", "Your expense and income heads", Icons.Rounded.Label, false) { go("categories") }
+                NavRow("Repeating entries", "Rent, subscriptions, SIPs", Icons.Rounded.Repeat, true) { go("recurring") }
+            }
+        }
+        item { Cap("Your data", Modifier.padding(24.dp, 24.dp, 24.dp, 8.dp)) }
+        item {
+            Panel(Modifier.padding(horizontal = 16.dp)) {
+                NavRow("Backup & export", "Auto-backup, CSV, restore", Icons.Rounded.Backup, true) { go("data") }
+            }
+        }
+        item { Cap("App", Modifier.padding(24.dp, 24.dp, 24.dp, 8.dp)) }
+        item {
+            Panel(Modifier.padding(horizontal = 16.dp)) {
+                NavRow("App updates", if (hasUpdate) "$latest is available" else "Version ${BuildConfig.VERSION_NAME}", Icons.Rounded.SystemUpdate, false) { go("updates") }
+                NavRow("Install & permission help", "Play Protect, usage access", Icons.Rounded.Help, false) { go("help") }
+                NavRow("About M_Tracker", "Privacy promise", Icons.Rounded.Info, true) { go("about") }
+            }
+        }
     }
 }
 
@@ -147,81 +194,133 @@ private fun SecurityPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () 
                 SwitchRow("Hide in recents & block screenshots", secure) { p.setSecure(it) }
                 Spacer(Modifier.height(8.dp))
                 Cap("Privacy promise")
-                Text("M_Tracker declares no INTERNET permission, so Android itself prevents it from sending anything off your device. There are no analytics, ads, accounts or servers. You can verify this under Settings → Apps → M_Tracker → Permissions.", color = L.muted, fontSize = 13.sp, lineHeight = 20.sp)
+                Text("Your transactions, accounts and people never leave this phone. There are no analytics, ads, accounts or servers. The internet is used for one thing only: checking and downloading app updates from your GitHub releases (you can switch that off under App updates).", color = L.muted, fontSize = 13.sp, lineHeight = 20.sp)
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
     val mode by p.mode.collectAsState()
+    val live by p.liveDetect.collectAsState()
     val delay by p.delaySec.collectAsState()
     val sel by p.apps.collectAsState()
     val accs by vm.accounts.collectAsState()
-    var query by remember { mutableStateOf("") }
     var installed by remember { mutableStateOf(listOf<Pair<String, String>>()) }
+    var browse by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
     LaunchedEffect(Unit) { installed = withContext(Dispatchers.IO) { loadLaunchables(ctx) } }
     val usageOk = remember(tick) { Perms.usage(ctx) }
     val listenerOk = remember(tick) { Perms.listener(ctx) }
-    val shown = remember(installed, query) { installed.filter { query.isBlank() || it.first.contains(query, true) } }
+    val suggested = remember(installed, sel) { installed.filter { looksLikePayment(it.first, it.second) && it.second !in sel }.take(6) }
     val accOptions = listOf("No account" to 0L) + accs.map { it.name to it.id }
 
-    SubPage("Reminders & detection", onBack) {
+    SubPage("Payment reminders", onBack) {
         item {
-            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Detection mode")
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 if (BuildConfig.AUTOFILL) {
+                    Cap("Detection")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip("App-Launch Timer", mode == "A") { p.setMode("A"); MonitorController.sync(ctx) }
-                        Chip("Notification Auto-Fill", mode == "B") { p.setMode("B"); MonitorController.sync(ctx) }
+                        Chip("Which app I opened", mode == "A") { p.setMode("A"); MonitorController.sync(ctx) }
+                        Chip("Read notifications", mode == "B") { p.setMode("B"); MonitorController.sync(ctx) }
                     }
                 }
                 if (mode == "A") {
-                    Text("Zero text reading. Only notices which selected app opened, then asks after your delay.", color = L.muted, fontSize = 12.sp)
+                    Cap("How should it notice?")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Chip("Quietly", !live) { p.setLive(false); MonitorController.sync(ctx) }
+                        Chip("Instantly", live) { p.setLive(true); MonitorController.sync(ctx) }
+                    }
+                    Text(
+                        if (!live) "Checks in the background every ~15 minutes and sends one tidy summary. Nothing sits in your notification shade. Short glances at an app are ignored."
+                        else "Notices right away and asks after a short delay. Android requires a small status notification while this is on.",
+                        color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
+                    )
+                    if (live) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120).forEach { (l, s) -> Chip(l, delay == s) { p.setDelay(s) } }
+                    }
                     if (usageOk) Cap("Usage access granted", color = L.green)
                     else {
-                        MonoButton("Grant usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
-                        Text("Greyed out or “restricted”? Tap here:", color = L.muted, fontSize = 12.sp)
-                        MonoButton("Fix it: step-by-step help", onHelp, filled = false)
+                        MonoButton("Allow usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
+                        Text("Greyed out? That’s Android’s sideload lock.", color = L.muted, fontSize = 12.sp)
+                        MonoButton("Show me how to fix it", onHelp, filled = false)
                     }
                 } else {
-                    Text("Reads ₹ amount and merchant from notifications of selected apps, on this device only. Needs debit keywords; duplicates within 60 s are ignored.", color = L.muted, fontSize = 12.sp)
+                    Text("Reads the amount and merchant from notifications of the apps below, on this device only.", color = L.muted, fontSize = 12.sp)
                     if (listenerOk) Cap("Notification access granted", color = L.green)
-                    else MonoButton("Grant notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+                    else MonoButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
                 }
-                if (!BuildConfig.AUTOFILL) Text("This standard build contains no notification-reading code (safer, and avoids Play Protect warnings).", color = L.muted, fontSize = 12.sp)
-            }
-            Hairline()
-            if (mode == "A") {
-                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Cap("Ask me after opening an app")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120, "5m" to 300).forEach { (l, s) -> Chip(l, delay == s) { p.setDelay(s) } }
-                    }
-                }
-                Hairline()
-            }
-            Column(Modifier.padding(24.dp, 20.dp, 24.dp, 4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Monitored payment apps")
-                Field("Search apps", query, { query = it })
+                Text("If an app fires again within 5 minutes you won’t be asked twice. Each “wrong call” makes that app a little less eager next time.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
-        items(shown, key = { it.second }) { (label, pkg) ->
-            val checked = sel.containsKey(pkg)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked, { on -> p.setApp(pkg, if (on) defaultAccount(label, accs) else null); MonitorController.sync(ctx) },
-                    colors = CheckboxDefaults.colors(checkedColor = L.accent, checkmarkColor = L.onAccent, uncheckedColor = L.muted)
-                )
-                Text(label, Modifier.weight(1f), color = L.text, fontSize = 14.sp, maxLines = 1)
-                if (checked) {
+        item { Cap("Apps I pay with", Modifier.padding(24.dp, 4.dp, 24.dp, 8.dp)) }
+        item {
+            if (sel.isEmpty()) Text("None yet. Add the apps you pay with below.", color = L.muted, fontSize = 13.sp, modifier = Modifier.padding(24.dp, 0.dp, 24.dp, 8.dp))
+            else Panel(Modifier.padding(horizontal = 16.dp)) {
+                sel.keys.toList().forEachIndexed { i, pkg ->
+                    val label = remember(pkg) { Perms.label(ctx, pkg) }
                     val id = sel[pkg] ?: 0L
-                    Picker("", accOptions.firstOrNull { it.second == id }?.first ?: "No account", accOptions, { p.setApp(pkg, it) }, Modifier.width(140.dp))
+                    Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AppIcon(pkg, 42.dp)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(label, color = L.text, fontSize = 15.sp, maxLines = 1)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Pays from ", color = L.muted, fontSize = 12.sp)
+                                Picker("", accOptions.firstOrNull { it.second == id }?.first ?: "No account", accOptions, { p.setApp(pkg, it) }, Modifier.width(150.dp))
+                            }
+                        }
+                        Icon(androidx.compose.material.icons.Icons.Rounded.Close, "Remove", tint = L.muted,
+                            modifier = Modifier.size(22.dp).clickable { p.setApp(pkg, null); MonitorController.sync(ctx) })
+                    }
+                    if (i < sel.size - 1) Hairline(Modifier.padding(start = 72.dp))
+                }
+            }
+        }
+        if (suggested.isNotEmpty()) {
+            item { Cap("Found on your phone", Modifier.padding(24.dp, 20.dp, 24.dp, 8.dp)) }
+            item {
+                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    suggested.forEach { (label, pkg) ->
+                        Column(
+                            Modifier.width(92.dp).clip(RoundedCornerShape(18.dp)).clickable {
+                                p.setApp(pkg, defaultAccount(label, accs)); MonitorController.sync(ctx)
+                            }.padding(vertical = 10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            AppIcon(pkg, 52.dp)
+                            Spacer(Modifier.height(6.dp))
+                            Text(label, color = L.text, fontSize = 11.sp, maxLines = 1)
+                            Cap("+ Add", color = L.muted)
+                        }
+                    }
+                }
+            }
+        }
+        item { Box(Modifier.padding(24.dp)) { MonoButton("Browse all apps", { browse = true }, filled = false) } }
+    }
+
+    if (browse) {
+        var q by remember { mutableStateOf("") }
+        val shown = installed.filter { q.isBlank() || it.first.contains(q, true) }
+        ModalBottomSheet(onDismissRequest = { browse = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false), containerColor = L.surface,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+            Column(Modifier.padding(horizontal = 24.dp)) { Cap("Add an app", color = L.text); Spacer(Modifier.height(8.dp)); Field("Search", q, { q = it }) }
+            LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+                lazyItems(shown, key = { it.second }) { (label, pkg) ->
+                    val on = sel.containsKey(pkg)
+                    Row(Modifier.fillMaxWidth().clickable {
+                        p.setApp(pkg, if (on) null else defaultAccount(label, accs)); MonitorController.sync(ctx)
+                    }.padding(24.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        AppIcon(pkg, 38.dp); Spacer(Modifier.width(14.dp))
+                        Text(label, color = L.text, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                        Checkbox(on, null, colors = CheckboxDefaults.colors(checkedColor = L.accent, checkmarkColor = L.onAccent, uncheckedColor = L.muted))
+                    }
                 }
             }
         }
@@ -233,7 +332,6 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
     val hour by p.checkinHour.collectAsState()
-    val quick by p.quickAdd.collectAsState()
     SubPage("Daily habits", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -245,10 +343,9 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                SwitchRow("Quick-add notification (always in your shade)", quick) { p.setQuickAdd(it); QuickAdd.sync(ctx) }
                 Spacer(Modifier.height(8.dp))
                 Cap("Shortcuts")
-                Text("Long-press the M_Tracker icon on your home screen for “Add expense” and “Add income”. Drag a shortcut out to make its own icon.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("Long-press the M_Tracker icon on your home screen for “Add expense” and “Add income”. Drag one out to keep it on your home screen. Nothing sits in your notification shade.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }
@@ -257,32 +354,31 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
 @Composable
 private fun CategoriesPage(vm: MainViewModel, onBack: () -> Unit) {
     val cats by vm.categories.collectAsState()
-    var newCat by remember { mutableStateOf("") }
-    SubPage("Categories", onBack) {
+    var creating by remember { mutableStateOf(false) }
+    SubPage("Heads (categories)", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Field("New category", newCat, { newCat = it })
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MonoButton("Add expense", { vm.addCategory(newCat, "EXPENSE"); newCat = "" })
-                    MonoButton("Add income", { vm.addCategory(newCat, "INCOME"); newCat = "" }, filled = false)
-                }
-                Text("Deleting a category never changes past transactions.", color = L.muted, fontSize = 12.sp)
+                MonoButton("+ New head", { creating = true })
+                Text("Heads are the buckets you file money into. Deleting one never changes past transactions.", color = L.muted, fontSize = 12.sp)
             }
             Hairline()
         }
         items(cats, key = { it.kind + it.name }) { c ->
             Column {
-                Row(Modifier.fillMaxWidth().padding(24.dp, 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(24.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    HeadTile(c.name, 40.dp, stored = c.icon.ifEmpty { null })
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(c.name, color = L.text, fontSize = 15.sp)
                         Cap(c.kind, color = L.muted)
                     }
                     Cap("Delete", Modifier.clickable { vm.deleteCategory(c.name, c.kind) }.padding(8.dp), color = L.red)
                 }
-                Hairline()
+                Hairline(Modifier.padding(start = 78.dp))
             }
         }
     }
+    if (creating) NewHeadDialog("EXPENSE", { n, k, ic -> vm.addHead(n, k, ic); creating = false }, { creating = false })
 }
 
 @Composable
@@ -410,7 +506,51 @@ private fun AboutPage(onBack: () -> Unit) {
                 Text("M_Tracker", color = L.text, fontSize = 22.sp)
                 Num("Version ${BuildConfig.VERSION_NAME}" + if (BuildConfig.AUTOFILL) " · auto-fill build" else "", size = 13.sp, color = L.muted)
                 Spacer(Modifier.height(8.dp))
-                Text("A private, offline expense tracker. Your data lives only in a local database on this device. No internet permission, no analytics, no ads, no account.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)
+                Text("A private expense tracker. Your data lives only in a local database on this device. No analytics, no ads, no account. The internet is used only to fetch app updates.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpdatesPage(vm: MainViewModel, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val p = vm.prefs
+    val st by Updater.state.collectAsState()
+    val auto by p.updateCheck.collectAsState()
+    val repoSaved by p.updateRepo.collectAsState()
+    var repo by remember { mutableStateOf(repoSaved.ifBlank { BuildConfig.GITHUB_REPO }) }
+    LaunchedEffect(Unit) { Updater.check(ctx, manual = true) }
+    SubPage("App updates", onBack) {
+        item {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Panel {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Cap("Installed")
+                        Num("Version ${BuildConfig.VERSION_NAME}", size = 22.sp, weight = FontWeight.Light)
+                        when (val s = st) {
+                            is UpdState.Checking -> Text("Checking…", color = L.muted, fontSize = 13.sp)
+                            is UpdState.UpToDate, is UpdState.Idle -> Text("You’re on the latest version.", color = L.green, fontSize = 13.sp)
+                            is UpdState.Available -> {
+                                Text("${s.info.tag} is available", color = L.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                                if (s.info.notes.isNotBlank()) Text(s.info.notes.trim().take(420), color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                                MonoButton("Update now", { Updater.downloadAndInstall(ctx, s.info) }, Modifier.fillMaxWidth())
+                            }
+                            is UpdState.Downloading -> {
+                                Text("Downloading… ${s.pct}%", color = L.text, fontSize = 14.sp)
+                                Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(L.border)) {
+                                    Box(Modifier.fillMaxWidth(s.pct / 100f).fillMaxHeight().background(L.text))
+                                }
+                            }
+                            is UpdState.Installing -> Text("Installing… confirm if Android asks.", color = L.text, fontSize = 14.sp)
+                            is UpdState.Error -> Text(s.msg, color = L.red, fontSize = 13.sp, lineHeight = 18.sp)
+                        }
+                    }
+                }
+                MonoButton("Check now", { Updater.check(ctx, manual = true) }, filled = false)
+                SwitchRow("Check for updates daily and tell me", auto) { p.setUpdateCheck(it); UpdateScheduler.sync(ctx) }
+                Field("GitHub repository (owner/name)", repo, { repo = it; p.setUpdateRepo(it) })
+                Text("New versions come from the Releases page of that repository. Android asks you to confirm each install once. The repository must be public for the app to see it.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }

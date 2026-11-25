@@ -9,7 +9,8 @@ data class Account(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val type: String,
-    val openingBalance: Double = 0.0
+    val openingBalance: Double = 0.0,
+    val color: Int = 0
 )
 
 /** type: EXPENSE | INCOME | TRANSFER. Amount is always positive. date = local start-of-day millis. */
@@ -25,7 +26,13 @@ data class Txn(
     val accountId: Long,
     val toAccountId: Long? = null,
     val tag: String = "",
-    val excludeFromBudget: Boolean = false
+    val excludeFromBudget: Boolean = false,
+    val createdAt: Long = 0,
+    val personId: Long = 0,
+    val owed: Double = 0.0,
+    val routeFrom: String = "",
+    val routeTo: String = "",
+    val items: String = ""
 )
 
 /** name = category name, or "__overall__" for the overall monthly budget. */
@@ -66,8 +73,22 @@ data class Recurring(
 
 /** kind: EXPENSE | INCOME */
 @Entity(tableName = "categories", primaryKeys = ["name", "kind"])
-data class Category(val name: String, val kind: String)
+data class Category(val name: String, val kind: String, val icon: String = "")
 
 /** A day you confirmed "no spending", so it still counts toward your streak. */
 @Entity(tableName = "daymarks")
 data class DayMark(@PrimaryKey val date: Long)
+
+/** Someone you split with, lend to, or buy things for. */
+@Entity(tableName = "persons")
+data class Person(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String)
+
+/** What you actually spent: your share only. Split / paid-for-them amounts that others owe you are excluded. */
+val Txn.myAmount: Double get() = if (type == "EXPENSE") amount - owed else amount
+
+/** Effect on the money in your accounts (transfers net to zero overall). */
+fun Txn.accountDelta(): Double = when (type) {
+    "INCOME", "PERSON_IN" -> amount
+    "EXPENSE", "PERSON_OUT" -> -amount
+    else -> 0.0
+}

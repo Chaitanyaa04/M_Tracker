@@ -26,8 +26,8 @@ class AppLaunchMonitorService : Service() {
         ReminderNotifier.ensureChannels(this)
         val n = NotificationCompat.Builder(this, ReminderNotifier.CH_MONITOR)
             .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle("App-launch guard active")
-            .setContentText("Only watches which payment app opens. No content is read.")
+            .setContentTitle("Instant detection on")
+            .setContentText("Turn off in Settings → Reminders to remove this.")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
@@ -60,7 +60,7 @@ class AppLaunchMonitorService : Service() {
     private fun handle(pkg: String, p: AppPrefs) {
         val accId = p.apps.value[pkg] ?: return
         val delayMs = p.delaySec.value * 1000L
-        if (!Cooldown.tryStart(pkg, delayMs + 30_000)) return
+        if (!Cooldown.tryStart(pkg, maxOf(delayMs + 30_000, 5 * 60_000L))) return
         scope.launch {
             delay(delayMs)
             if (p.mode.value == "A") {

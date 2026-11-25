@@ -2,7 +2,15 @@ package com.mtracker.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,6 +23,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,7 +40,8 @@ data class LedgerColors(
     val bg: Color, val surface: Color, val border: Color,
     val text: Color, val muted: Color,
     val accent: Color, val onAccent: Color,
-    val green: Color, val red: Color
+    val green: Color, val red: Color,
+    val dark: Boolean = true
 )
 
 val OledColors = LedgerColors(
@@ -43,7 +54,7 @@ val PaperColors = LedgerColors(
     bg = Color(0xFFFAFAFA), surface = Color(0xFFFFFFFF), border = Color(0xFFE5E5E5),
     text = Color(0xFF111111), muted = Color(0xFF666666),
     accent = Color(0xFF000000), onAccent = Color(0xFFFFFFFF),
-    green = Color(0xFF2E7D32), red = Color(0xFFB91C1C)
+    green = Color(0xFF2E7D32), red = Color(0xFFB91C1C), dark = false
 )
 
 val LocalLedger = staticCompositionLocalOf { OledColors }
@@ -101,13 +112,34 @@ fun Num(t: String, modifier: Modifier = Modifier, size: TextUnit = 15.sp, color:
 fun Hairline(modifier: Modifier = Modifier) =
     Box(modifier.fillMaxWidth().height(1.dp).background(L.border))
 
+/** Springy press feedback, so every tap feels physical. */
+@Composable
+fun Modifier.tactile(onClick: () -> Unit): Modifier {
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val sc by animateFloatAsState(if (pressed) 0.95f else 1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = 600f), label = "press")
+    return this.graphicsLayer { scaleX = sc; scaleY = sc }.clickable(interactionSource = src, indication = null, onClick = onClick)
+}
+
+/** A soft rounded surface. Used to group rows instead of drawing lines everywhere. */
+@Composable
+fun Panel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val shape = RoundedCornerShape(22.dp)
+    Column(
+        modifier.fillMaxWidth().clip(shape)
+            .background(Brush.verticalGradient(listOf(L.surface, lerp(L.surface, L.bg, 0.45f))))
+            .border(1.dp, L.border, shape),
+        content = content
+    )
+}
+
 @Composable
 fun MonoButton(t: String, onClick: () -> Unit, modifier: Modifier = Modifier, filled: Boolean = true) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(14.dp)
     Box(
-        modifier.clip(shape)
-            .then(if (filled) Modifier.background(L.accent) else Modifier.border(1.dp, L.border, shape))
-            .clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 11.dp),
+        modifier.tactile(onClick).clip(shape)
+            .then(if (filled) Modifier.background(L.accent) else Modifier.border(1.dp, L.border, shape).background(L.surface))
+            .padding(horizontal = 18.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(t.uppercase(), color = if (filled) L.onAccent else L.text,
@@ -117,11 +149,11 @@ fun MonoButton(t: String, onClick: () -> Unit, modifier: Modifier = Modifier, fi
 
 @Composable
 fun Chip(t: String, selected: Boolean, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = RoundedCornerShape(14.dp)
     Box(
-        Modifier.clip(shape)
-            .then(if (selected) Modifier.background(L.accent) else Modifier.border(1.dp, L.border, shape))
-            .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp)
+        Modifier.tactile(onClick).clip(shape)
+            .then(if (selected) Modifier.background(L.accent) else Modifier.border(1.dp, L.border, shape).background(L.surface))
+            .padding(horizontal = 14.dp, vertical = 9.dp)
     ) {
         Text(t, color = if (selected) L.onAccent else L.text, fontSize = 13.sp)
     }
@@ -173,5 +205,18 @@ fun <T> Picker(label: String, value: String, options: List<Pair<String, T>>, onP
                 DropdownMenuItem(text = { Text(n, color = L.text) }, onClick = { onPick(v); expanded = false })
             }
         }
+    }
+}
+
+/** The real launcher icon of an installed app. */
+@Composable
+fun AppIcon(pkg: String, size: androidx.compose.ui.unit.Dp = 40.dp) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val bmp = remember(pkg) {
+        runCatching { ctx.packageManager.getApplicationIcon(pkg).toBitmap(96, 96).asImageBitmap() }.getOrNull()
+    }
+    Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.28f)).background(L.border), contentAlignment = Alignment.Center) {
+        if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.fillMaxSize())
+        else Text("₹", color = L.muted, fontSize = 16.sp)
     }
 }

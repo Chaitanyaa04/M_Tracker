@@ -28,7 +28,7 @@ object ReminderNotifier {
     const val CH = "reminders"
     const val CH_MONITOR = "monitor"
     const val CH_CHECKIN = "checkin"
-    const val CH_QUICK = "quick"
+    const val CH_UPDATE = "updates"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun ensureChannels(c: Context) {
@@ -36,18 +36,46 @@ object ReminderNotifier {
         nm.createNotificationChannel(NotificationChannel(CH, "Payment reminders", NotificationManager.IMPORTANCE_HIGH))
         nm.createNotificationChannel(NotificationChannel(CH_MONITOR, "App-launch guard", NotificationManager.IMPORTANCE_MIN))
         nm.createNotificationChannel(NotificationChannel(CH_CHECKIN, "Daily check-in", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_QUICK, "Quick add", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, "App updates", NotificationManager.IMPORTANCE_LOW))
     }
 
     /** Saves the prompt as an "unlogged payment" FIRST, so it can't be forgotten, then notifies. */
     fun show(c: Context, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?) {
         val app = c.applicationContext
         scope.launch {
-            val pid = AppDatabase.get(app).dao().insertPending(
+            val dao = AppDatabase.get(app).dao()
+            // Same app triggered again within 5 minutes? That's the same visit (or a wrong call): stay quiet.
+            if (dao.countRecent(pkg, System.currentTimeMillis() - 5 * 60_000) > 0) return@launch
+            val pid = dao.insertPending(
                 Pending(time = System.currentTimeMillis(), pkg = pkg, label = label, accountId = accountId, amount = amount, merchant = merchant)
             )
             post(app, pid, pkg, label, accountId, amount, merchant)
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun summary(c: Context, count: Int) {
+        ensureChannels(c)
+        val nm = NotificationManagerCompat.from(c)
+        if (!nm.areNotificationsEnabled()) return
+        nm.notify(4, NotificationCompat.Builder(c, CH)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle(if (count == 1) "1 payment visit to log" else "$count payment visits to log")
+            .setContentText("Tap to review. Dismiss any that were a mistake.")
+            .setAutoCancel(true).setContentIntent(activityPi(c, 8001, null)).build())
+    }
+
+    @SuppressLint("MissingPermission")
+    fun updateAvailable(c: Context, tag: String) {
+        ensureChannels(c)
+        val nm = NotificationManagerCompat.from(c)
+        if (!nm.areNotificationsEnabled()) return
+        nm.notify(5, NotificationCompat.Builder(c, CH_UPDATE)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("M_Tracker $tag is ready")
+            .setContentText("Tap to update. It takes a few seconds.")
+            .setAutoCancel(true)
+            .setContentIntent(activityPi(c, 8002, null) { putExtra(Extras.OPEN, "updates") }).build())
     }
 
     @SuppressLint("MissingPermission")
@@ -118,28 +146,5 @@ object CheckinNotifier {
             )
         )
         nm.notify(ID, b.build())
-    }
-}
-
-/** Optional always-there notification: pull down the shade, tap Expense, done. */
-object QuickAdd {
-    const val ID = 2
-
-    @SuppressLint("MissingPermission")
-    fun sync(c: Context) {
-        val nm = NotificationManagerCompat.from(c)
-        if (!AppPrefs.get(c).quickAdd.value) { nm.cancel(ID); return }
-        ReminderNotifier.ensureChannels(c)
-        if (!nm.areNotificationsEnabled()) return
-        val n = NotificationCompat.Builder(c, ReminderNotifier.CH_QUICK)
-            .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle("Log a transaction")
-            .setOngoing(true)
-            .setSilent(true)
-            .setContentIntent(activityPi(c, 9000, null))
-            .addAction(0, "Expense", activityPi(c, 9001, "EXPENSE"))
-            .addAction(0, "Income", activityPi(c, 9002, "INCOME"))
-            .build()
-        nm.notify(ID, n)
     }
 }

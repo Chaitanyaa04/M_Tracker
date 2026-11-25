@@ -15,7 +15,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             // "Wrong Call": dismiss silently, log nothing, forget the pending prompt, reset cooldown.
             Extras.ACTION_WRONG -> {
                 NotificationManagerCompat.from(c).cancel(nid)
-                i.getStringExtra(Extras.PKG)?.let { Cooldown.reset(it) }
+                i.getStringExtra(Extras.PKG)?.let { Cooldown.reset(it); AppPrefs.get(c).bumpWrong(it) }
                 val pid = i.getLongExtra(Extras.PENDING, 0L)
                 if (pid != 0L) async(c) { it.dao().deletePending(pid) }
             }
@@ -39,7 +39,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         if (i.action == Intent.ACTION_BOOT_COMPLETED) {
             MonitorController.sync(c)
-            QuickAdd.sync(c)
+            UpdateScheduler.sync(c)
             CheckinScheduler.sync(c)
         }
     }

@@ -9,7 +9,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -27,7 +31,7 @@ import kotlin.math.abs
 fun trendSeries(txns: List<Txn>, accs: List<Account>, lo: Long, hi: Long): List<Double> {
     val z = ZoneId.systemDefault()
     val opening = accs.sumOf { it.openingBalance }
-    val flows = txns.filter { it.type != "TRANSFER" }.sortedBy { it.date }
+    val flows = txns.filter { it.accountDelta() != 0.0 }.sortedBy { it.date }
     if (flows.isEmpty()) return emptyList()
     val d0 = Instant.ofEpochMilli(if (lo == 0L) flows.first().date else lo).atZone(z).toLocalDate()
     val d1 = Instant.ofEpochMilli(minOf(hi, today())).atZone(z).toLocalDate()
@@ -39,7 +43,7 @@ fun trendSeries(txns: List<Txn>, accs: List<Account>, lo: Long, hi: Long): List<
         val dm = dayMillis(d0.plusDays(i.toLong()))
         while (idx < flows.size && flows[idx].date <= dm) {
             val t = flows[idx++]
-            run += if (t.type == "INCOME") t.amount else -t.amount
+            run += t.accountDelta()
         }
         out.add(opening + run)
     }
@@ -67,17 +71,20 @@ fun InsightsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         (if (m == 0) 0L else dayMillis(LocalDate.now().minusMonths(m.toLong()))) to Long.MAX_VALUE
     }
     val ex = remember(txns, lo, hi) { txns.filter { it.type == "EXPENSE" && it.date in lo..hi } }
-    val total = ex.sumOf { it.amount }
-    val cats = remember(ex) { ex.groupBy { it.category }.map { it.key to it.value.sumOf { t -> t.amount } }.sortedByDescending { it.second } }
+    val total = ex.sumOf { it.myAmount }
+    val cats = remember(ex) { ex.groupBy { it.category }.map { it.key to it.value.sumOf { t -> t.myAmount } }.sortedByDescending { it.second } }
     val merchants = remember(ex) {
         ex.filter { it.merchant.isNotBlank() }.groupBy { it.merchant.trim() }
-            .map { it.key to it.value.sumOf { t -> t.amount } }.sortedByDescending { it.second }
+            .map { it.key to it.value.sumOf { t -> t.myAmount } }.sortedByDescending { it.second }
     }
     val tags = remember(ex) {
         ex.filter { it.tag.isNotBlank() }.groupBy { "#" + it.tag.trim() }
-            .map { it.key to it.value.sumOf { t -> t.amount } }.sortedByDescending { it.second }
+            .map { it.key to it.value.sumOf { t -> t.myAmount } }.sortedByDescending { it.second }
     }
     val series = remember(txns, accs, lo, hi) { trendSeries(txns, accs, lo, hi) }
+    val marks by vm.dayMarks.collectAsState()
+    val spendByDay = remember(txns) { txns.filter { it.type == "EXPENSE" }.groupBy { it.date }.mapValues { e -> e.value.sumOf { it.myAmount } } }
+    val logged = remember(txns, marks) { txns.map { it.date }.toSet() + marks.map { it.date }.toSet() }
 
     LazyColumn(modifier.fillMaxSize()) {
         item {
@@ -113,8 +120,16 @@ fun InsightsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
             }
             Hairline()
         }
+        item {
+            Column(Modifier.padding(24.dp, 20.dp)) {
+                Cap("Activity · last 16 weeks")
+                Spacer(Modifier.height(12.dp))
+                Heatmap(spendByDay, logged)
+            }
+            Hairline()
+        }
         item { CashFlow(txns, flowMode) { flowMode = it } }
-        item { Ranked("Spend by category", cats) }
+        item { Ranked("Spend by head", cats, heads = true) }
         item { Ranked("Top merchants", merchants) }
         item { Ranked("Spend by tag", tags) }
         item { Spacer(Modifier.height(96.dp)) }
@@ -157,7 +172,7 @@ fun TrendChart(v: List<Double>) {
 
 @Composable
 fun CashFlow(txns: List<Txn>, mode: Int, onMode: (Int) -> Unit) {
-    val flows = remember(txns) { txns.filter { it.type != "TRANSFER" } }
+    val flows = remember(txns) { txns.filter { it.type == "EXPENSE" || it.type == "INCOME" } }
     fun net(a: Long, b: Long) = flows.filter { it.date >= a && it.date < b }.sumOf { if (it.type == "INCOME") it.amount else -it.amount }
     val rows: List<Pair<String, Double>> = if (mode == 0) (0..6).map { k ->
         val d = LocalDate.now().minusDays(k.toLong())
@@ -189,7 +204,7 @@ fun CashFlow(txns: List<Txn>, mode: Int, onMode: (Int) -> Unit) {
 }
 
 @Composable
-fun Ranked(title: String, rows: List<Pair<String, Double>>, limit: Int = 8) {
+fun Ranked(title: String, rows: List<Pair<String, Double>>, limit: Int = 8, heads: Boolean = false) {
     Column {
         Cap(title, Modifier.padding(24.dp, 28.dp, 24.dp, 8.dp))
         Hairline()
@@ -198,7 +213,10 @@ fun Ranked(title: String, rows: List<Pair<String, Double>>, limit: Int = 8) {
         rows.take(limit).forEach { (n, v) ->
             Column(Modifier.padding(24.dp, 12.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(n, color = L.text, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        if (heads) { HeadTile(n, 30.dp); Spacer(Modifier.width(12.dp)) }
+                        Text(n, color = L.text, fontSize = 14.sp, maxLines = 1)
+                    }
                     Spacer(Modifier.width(12.dp))
                     Num(inr(v), size = 14.sp)
                 }
@@ -209,5 +227,36 @@ fun Ranked(title: String, rows: List<Pair<String, Double>>, limit: Int = 8) {
             }
             Hairline()
         }
+    }
+}
+
+/** 16 weeks of days: filled = spent (darker = more), green dot = logged a no-spend day, outline = nothing logged. */
+@Composable
+fun Heatmap(spendByDay: Map<Long, Double>, logged: Set<Long>) {
+    val weeks = 16
+    val first = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).minusWeeks((weeks - 1).toLong())
+    val today = LocalDate.now()
+    val mx = spendByDay.values.maxOrNull() ?: 1.0
+    val ink = L.text; val line = L.border; val green = L.green
+    Column {
+        Canvas(Modifier.fillMaxWidth().height(132.dp)) {
+            val gap = 4.dp.toPx()
+            val cell = (size.width - gap * (weeks - 1)) / weeks
+            for (c in 0 until weeks) for (r in 0 until 7) {
+                val d = first.plusDays((c * 7 + r).toLong())
+                if (d.isAfter(today)) continue
+                val key = dayMillis(d)
+                val x = c * (cell + gap); val y = r * (cell + gap)
+                val sp = spendByDay[key]
+                val radius = CornerRadius(3.dp.toPx())
+                when {
+                    sp != null && sp > 0 -> drawRoundRect(ink.copy(alpha = (0.2 + 0.8 * (sp / mx)).toFloat().coerceIn(0.2f, 1f)), Offset(x, y), Size(cell, cell), radius)
+                    key in logged -> drawRoundRect(green.copy(alpha = 0.55f), Offset(x, y), Size(cell, cell), radius)
+                    else -> drawRoundRect(line, Offset(x, y), Size(cell, cell), radius, style = Stroke(width = 1.dp.toPx()))
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Darker = spent more · green = no-spend day · outline = nothing logged", color = L.muted, fontSize = 11.sp)
     }
 }

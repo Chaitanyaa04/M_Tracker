@@ -1,22 +1,19 @@
 # M_Tracker
 
-Private, offline expense tracker (Kotlin, Jetpack Compose, Room). No INTERNET permission.
+A private expense tracker (Kotlin, Jetpack Compose, Room). Your data stays on the phone. The only network use
+is checking/downloading app updates from this repository's GitHub Releases.
 
-## Build
-Open in Android Studio (Koala+) and run the `standardDebug` variant, or use GitHub Actions below.
-Two flavors: **standard** (recommended, no notification-reading code) and **autofill** (adds notification auto-fill).
+## Publish an update (what the in-app updater looks for)
+1. Make this repository **public** (the app reads Releases without logging in; no secrets are in the code).
+2. One-time: run the **Generate signing key** workflow, copy the four values into
+   Settings > Secrets and variables > Actions (`KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`),
+   keep a private copy of the key, then delete that workflow file.
+3. To ship a version: `git tag v1.3.0 && git push origin v1.3.0`.
+   The workflow builds a signed APK and creates a Release named v1.3.0 with the APK attached.
+4. On the phone: a banner appears in the app ("Update available"). Tap **Update**, confirm once in Android's installer.
 
-## Quick start (GitHub Actions)
-See the step list in the chat, or: create a PRIVATE repo, push this folder's contents to `main`, open Actions, run **Build M_Tracker APK**, download the `M_Tracker-apk` artifact.
+First install: download the APK from the Release (or the workflow artifact) and install it from your file manager.
+Allow "Install unknown apps" for M_Tracker the first time you update from inside the app.
 
-## Signed releases (fixes "app changes every build" + helps Play Protect)
-1. Create ONE key and keep it forever:
-   `keytool -genkeypair -v -keystore release.jks -alias mtracker -keyalg RSA -keysize 2048 -validity 10000`
-2. `base64 -w0 release.jks` -> GitHub repo Settings > Secrets > Actions:
-   `KEYSTORE_B64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` (mtracker), `KEY_PASSWORD`.
-3. Push to `main`; download the APK artifact. Always sign updates with the same key.
-
-## Installing on your phone
-- Install from a file manager (not straight from a browser/chat). If Play Protect asks, tap *Scan app*.
-- Usage access greyed out: App info > ⋮ > *Allow restricted settings*, then enable usage access
-  (the in-app Settings > Install & permission help has the steps and buttons).
+## Flavors
+`standard` is the recommended build (no notification-reading code). `autofill` adds optional notification auto-fill.

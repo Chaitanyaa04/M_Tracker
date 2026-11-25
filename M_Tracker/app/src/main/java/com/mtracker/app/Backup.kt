@@ -21,17 +21,19 @@ object BackupManager {
     suspend fun toJson(db: AppDatabase): String = withContext(Dispatchers.IO) {
         val d = db.dao()
         val accs = d.allAccounts(); val txns = d.allTxns(); val budgets = d.allBudgets()
-        val cats = d.allCategories(); val recs = d.allRecurring()
+        val cats = d.allCategories(); val recs = d.allRecurring(); val persons = d.allPersons()
         JSONObject().apply {
             put("app", "M_Tracker"); put("schema", 2); put("exportedAt", System.currentTimeMillis())
-            put("accounts", JSONArray().also { a -> accs.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("type", it.type).put("opening", it.openingBalance)) } })
+            put("accounts", JSONArray().also { a -> accs.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name).put("type", it.type).put("opening", it.openingBalance).put("color", it.color)) } })
             put("transactions", JSONArray().also { a -> txns.forEach {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
                     .put("note", it.note).put("date", it.date).put("category", it.category).put("account", it.accountId)
-                    .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget))
+                    .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget).put("created", it.createdAt)
+                    .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items))
             } })
+            put("persons", JSONArray().also { a -> persons.forEach { a.put(JSONObject().put("id", it.id).put("name", it.name)) } })
             put("budgets", JSONArray().also { a -> budgets.forEach { a.put(JSONObject().put("name", it.name).put("amount", it.amount)) } })
-            put("categories", JSONArray().also { a -> cats.forEach { a.put(JSONObject().put("name", it.name).put("kind", it.kind)) } })
+            put("categories", JSONArray().also { a -> cats.forEach { a.put(JSONObject().put("name", it.name).put("kind", it.kind).put("icon", it.icon)) } })
             put("recurring", JSONArray().also { a -> recs.forEach {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
                     .put("note", it.note).put("category", it.category).put("account", it.accountId)
@@ -46,13 +48,15 @@ object BackupManager {
         val o = JSONObject(json)
         require(o.optString("app") == "M_Tracker")
         fun JSONObject.toOrNull(k: String): Long? = if (isNull(k)) null else getLong(k)
-        val accs = o.getJSONArray("accounts").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Account(it.getLong("id"), it.getString("name"), it.getString("type"), it.getDouble("opening")) } }
+        val accs = o.getJSONArray("accounts").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Account(it.getLong("id"), it.getString("name"), it.getString("type"), it.getDouble("opening"), it.optInt("color", 0)) } }
         val txns = o.getJSONArray("transactions").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map {
             Txn(it.getLong("id"), it.getString("type"), it.getDouble("amount"), it.getString("merchant"), it.getString("note"), it.getLong("date"),
-                it.getString("category"), it.getLong("account"), it.toOrNull("to"), it.getString("tag"), it.getBoolean("exclude"))
+                it.getString("category"), it.getLong("account"), it.toOrNull("to"), it.getString("tag"), it.getBoolean("exclude"), it.optLong("created", 0),
+                it.optLong("person", 0), it.optDouble("owed", 0.0), it.optString("from", ""), it.optString("toPlace", ""), it.optString("items", ""))
         } }
+        val persons = o.optJSONArray("persons")?.let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Person(it.getLong("id"), it.getString("name")) } } ?: emptyList()
         val budgets = o.getJSONArray("budgets").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Budget(it.getString("name"), it.getDouble("amount")) } }
-        val cats = o.getJSONArray("categories").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Category(it.getString("name"), it.getString("kind")) } }
+        val cats = o.getJSONArray("categories").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Category(it.getString("name"), it.getString("kind"), it.optString("icon", "")) } }
         val recs = o.getJSONArray("recurring").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map {
             Recurring(it.getLong("id"), it.getString("type"), it.getDouble("amount"), it.getString("merchant"), it.getString("note"),
                 it.getString("category"), it.getLong("account"), it.toOrNull("to"), it.getString("tag"), it.getBoolean("exclude"),
@@ -60,12 +64,13 @@ object BackupManager {
         } }
         val d = db.dao()
         db.withTransaction {
-            d.clearTxns(); d.clearRecurring(); d.clearAccounts(); d.clearBudgets(); d.clearCategories()
+            d.clearTxns(); d.clearPersons(); d.clearRecurring(); d.clearAccounts(); d.clearBudgets(); d.clearCategories()
             accs.forEach { d.insertAccount(it) }
             txns.forEach { d.insert(it) }
             budgets.forEach { d.upsertBudget(it) }
             cats.forEach { d.insertCategory(it) }
             recs.forEach { d.insertRecurring(it) }
+            persons.forEach { d.insertPerson(it) }
         }
         txns.size
     }

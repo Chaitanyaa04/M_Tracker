@@ -77,4 +77,15 @@ interface LedgerDao {
     @Query("DELETE FROM budgets") suspend fun clearBudgets()
     @Query("DELETE FROM recurring") suspend fun clearRecurring()
     @Query("DELETE FROM categories") suspend fun clearCategories()
+
+    // people
+    @Query("SELECT * FROM persons ORDER BY name COLLATE NOCASE") fun persons(): Flow<List<Person>>
+    @Query("SELECT * FROM persons") suspend fun allPersons(): List<Person>
+    @Insert suspend fun insertPerson(p: Person): Long
+    @Query("DELETE FROM persons WHERE id = :id") suspend fun deletePerson(id: Long)
+    @Query("UPDATE transactions SET personId = 0, owed = 0 WHERE personId = :id") suspend fun detachPerson(id: Long)
+    @Query("DELETE FROM persons") suspend fun clearPersons()
+
+    // de-duplication of payment prompts
+    @Query("SELECT COUNT(*) FROM pending WHERE pkg = :pkg AND time > :since") suspend fun countRecent(pkg: String, since: Long): Int
 }

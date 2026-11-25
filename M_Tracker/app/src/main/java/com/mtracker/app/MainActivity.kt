@@ -21,7 +21,18 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.Insights
+import androidx.compose.material.icons.rounded.ReceiptLong
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -84,6 +95,7 @@ class MainActivity : FragmentActivity() {
 
     /** Reminder / shortcut / check-in actions arrive here as extras. */
     private fun handle(i: Intent?) {
+        i?.getStringExtra(Extras.OPEN)?.let { vm.settingsTarget.value = it; i.removeExtra(Extras.OPEN) }
         val type = i?.getStringExtra(Extras.TYPE) ?: return
         NotificationManagerCompat.from(this).cancel(i.getIntExtra(Extras.NOTIF_ID, -1))
         val amount = if (i.hasExtra(Extras.AMOUNT)) i.getDoubleExtra(Extras.AMOUNT, 0.0) else null
@@ -93,6 +105,7 @@ class MainActivity : FragmentActivity() {
 }
 
 private val TABS = listOf("Ledger", "Accounts", "Plan", "Insights")
+private val TAB_ICONS = listOf(Icons.Rounded.ReceiptLong, Icons.Rounded.AccountBalanceWallet, Icons.Rounded.Flag, Icons.Rounded.Insights)
 
 @Composable
 fun App(vm: MainViewModel, onAuth: () -> Unit) {
@@ -120,6 +133,41 @@ fun App(vm: MainViewModel, onAuth: () -> Unit) {
 }
 
 @Composable
+private fun NavItem(label: String, icon: ImageVector, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    Column(
+        modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, label, tint = if (selected) L.text else L.muted, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.height(2.dp))
+        Cap(label, color = if (selected) L.text else L.muted)
+    }
+}
+
+/** Floating pill: four tabs and a raised + in the middle. */
+@Composable
+private fun FloatingNav(tab: Int, showSettings: Boolean, onTab: (Int) -> Unit, onAdd: () -> Unit) {
+    val shape = RoundedCornerShape(30.dp)
+    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(shape).background(L.surface).border(1.dp, L.border, shape).padding(horizontal = 6.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NavItem(TABS[0], TAB_ICONS[0], !showSettings && tab == 0, Modifier.weight(1f)) { onTab(0) }
+            NavItem(TABS[1], TAB_ICONS[1], !showSettings && tab == 1, Modifier.weight(1f)) { onTab(1) }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(54.dp).clip(RoundedCornerShape(19.dp)).background(L.accent).clickable(onClick = onAdd),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Rounded.Add, "Add transaction", tint = L.onAccent, modifier = Modifier.size(30.dp)) }
+            }
+            NavItem(TABS[2], TAB_ICONS[2], !showSettings && tab == 2, Modifier.weight(1f)) { onTab(2) }
+            NavItem(TABS[3], TAB_ICONS[3], !showSettings && tab == 3, Modifier.weight(1f)) { onTab(3) }
+        }
+    }
+}
+
+@Composable
 private fun Shell(vm: MainViewModel) {
     val ctx = LocalContext.current
     val mode by vm.prefs.mode.collectAsState()
@@ -127,19 +175,28 @@ private fun Shell(vm: MainViewModel) {
     var tick by remember { mutableIntStateOf(0) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var settingsStart by remember { mutableStateOf("home") }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val draft by vm.draft.collectAsState()
     val accs by vm.accounts.collectAsState()
-    val expenseCats by vm.expenseCats.collectAsState()
-    val incomeCats by vm.incomeCats.collectAsState()
+    val heads by vm.categories.collectAsState()
+    val usage by vm.usage.collectAsState()
+    val iconMap by vm.iconMap.collectAsState()
     val recents by vm.recents.collectAsState()
     val merchants by vm.merchantNames.collectAsState()
+    val people by vm.persons.collectAsState()
+    val latest by vm.prefs.latestTag.collectAsState()
+    val target by vm.settingsTarget.collectAsState()
+    LaunchedEffect(target) { target?.let { settingsStart = it; showSettings = true; vm.settingsTarget.value = null } }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         tick++
-        MonitorController.sync(ctx); QuickAdd.sync(ctx); CheckinScheduler.sync(ctx); BackupScheduler.sync(ctx)
+        MonitorController.sync(ctx); CheckinScheduler.sync(ctx); BackupScheduler.sync(ctx); UpdateScheduler.sync(ctx)
         vm.materialize()
+        NotificationManagerCompat.from(ctx).cancel(2)   // remove the old always-on quick-add notification if it's still there
+        val pr = vm.prefs
+        if (pr.updateCheck.value && System.currentTimeMillis() - pr.lastUpdateCheck.value > 12 * 3_600_000L) Updater.check(ctx)
     }
     LaunchedEffect(mode, apps) { MonitorController.sync(ctx) }
 
@@ -155,91 +212,86 @@ private fun Shell(vm: MainViewModel) {
         if (mode == "A") DetectStatus("App-Launch Guard", Perms.usage(ctx)) else DetectStatus("Notification Parser", Perms.listener(ctx))
     }
 
-    Scaffold(
-        containerColor = L.bg,
-        snackbarHost = {
-            SnackbarHost(snackbar) {
-                Snackbar(it, shape = RoundedCornerShape(6.dp), containerColor = L.accent, contentColor = L.onAccent, actionContentColor = L.onAccent)
-            }
-        },
-        topBar = {
-            Column(Modifier.background(L.bg)) {
+    CompositionLocalProvider(LocalHeadIcons provides iconMap) {
+        Scaffold(
+            containerColor = L.bg,
+            snackbarHost = {
+                SnackbarHost(snackbar) {
+                    Snackbar(it, shape = RoundedCornerShape(12.dp), containerColor = L.accent, contentColor = L.onAccent, actionContentColor = L.onAccent)
+                }
+            },
+            topBar = {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 24.dp, vertical = 16.dp),
+                    Modifier.fillMaxWidth().background(L.bg).statusBarsPadding().padding(horizontal = 24.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("₹", color = L.text, fontSize = 18.sp, fontWeight = FontWeight.Medium)
+                        Text("₹", color = L.text, fontSize = 22.sp, fontWeight = FontWeight.Medium)
                         Spacer(Modifier.width(10.dp))
                         Cap(if (showSettings) "Settings" else TABS[tab], color = L.text)
                     }
-                    Cap(if (showSettings) "Close" else "Settings", Modifier.clickable { showSettings = !showSettings }.padding(8.dp))
+                    Icon(
+                        if (showSettings) Icons.Rounded.Close else Icons.Rounded.Tune, "Settings", tint = L.text,
+                        modifier = Modifier.size(24.dp).clickable { showSettings = !showSettings }
+                    )
                 }
-                Hairline()
-            }
-        },
-        bottomBar = {
-            Column(Modifier.background(L.bg)) {
-                Hairline()
-                Row(Modifier.fillMaxWidth().navigationBarsPadding()) {
-                    TABS.forEachIndexed { i, t ->
-                        val sel = !showSettings && tab == i
-                        Column(
-                            Modifier.weight(1f).clickable { tab = i; showSettings = false }.padding(bottom = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Box(Modifier.width(24.dp).height(2.dp).background(if (sel) L.text else L.bg))
-                            Spacer(Modifier.height(14.dp))
-                            Cap(t, color = if (sel) L.text else L.muted)
-                        }
+            },
+            bottomBar = { FloatingNav(tab, showSettings, { tab = it; showSettings = false; settingsStart = "home" }) { vm.newDraft() } }
+        ) { inner ->
+            Column(Modifier.padding(inner).fillMaxSize()) {
+              if (!showSettings && latest.isNotBlank() && Updater.isNewer(latest, BuildConfig.VERSION_NAME)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(16.dp, 0.dp, 16.dp, 8.dp).clip(RoundedCornerShape(16.dp)).background(L.accent)
+                        .clickable { settingsStart = "updates"; showSettings = true }.padding(16.dp, 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Update available", color = L.onAccent, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text("$latest is ready to install", color = L.onAccent.copy(alpha = 0.7f), fontSize = 12.sp)
+                    }
+                    Cap("Update", color = L.onAccent)
+                }
+              }
+              Box(Modifier.weight(1f).fillMaxWidth()) {
+                Crossfade(if (showSettings) 99 else tab, label = "screen") { t ->
+                    when (t) {
+                        99 -> SettingsScreen(vm, { m -> scope.launch { snackbar.showSnackbar(m) } }, startPage = settingsStart)
+                        0 -> LedgerScreen(
+                            vm, status,
+                            onStatus = {
+                                if (!status.ok) ctx.startActivity(
+                                    Intent(if (mode == "A") Settings.ACTION_USAGE_ACCESS_SETTINGS else Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                ) else showSettings = true
+                            },
+                            onDelete = { tx ->
+                                vm.delete(tx)
+                                scope.launch {
+                                    snackbar.currentSnackbarData?.dismiss()
+                                    val r = snackbar.showSnackbar("Transaction deleted", "Undo", duration = SnackbarDuration.Short)
+                                    if (r == SnackbarResult.ActionPerformed) vm.restore(tx)
+                                }
+                            },
+                            onPending = { p, a -> if (a == "DISMISS") vm.dismissPending(p) else vm.fromPending(p, a) }
+                        )
+                        1 -> AccountsScreen(vm, onTransfer = { vm.newDraft("TRANSFER") })
+                        2 -> PlanScreen(vm)
+                        else -> InsightsScreen(vm)
                     }
                 }
-            }
-        },
-        floatingActionButton = {
-            if (!showSettings) FloatingActionButton(
-                onClick = { vm.newDraft() },
-                containerColor = L.accent, contentColor = L.onAccent, shape = RoundedCornerShape(6.dp),
-                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
-            ) { Text("+", fontSize = 26.sp, fontWeight = FontWeight.Light) }
-        }
-    ) { inner ->
-        Box(Modifier.padding(inner).fillMaxSize()) {
-            Crossfade(if (showSettings) 99 else tab, label = "screen") { t ->
-                when (t) {
-                    99 -> SettingsScreen(vm, { m -> scope.launch { snackbar.showSnackbar(m) } })
-                    0 -> LedgerScreen(
-                        vm, status,
-                        onStatus = {
-                            if (!status.ok) ctx.startActivity(
-                                Intent(if (mode == "A") Settings.ACTION_USAGE_ACCESS_SETTINGS else Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                            ) else showSettings = true
-                        },
-                        onDelete = { tx ->
-                            vm.delete(tx)
-                            scope.launch {
-                                snackbar.currentSnackbarData?.dismiss()
-                                val r = snackbar.showSnackbar("Transaction deleted", "Undo", duration = SnackbarDuration.Short)
-                                if (r == SnackbarResult.ActionPerformed) vm.restore(tx)
-                            }
-                        },
-                        onPending = { p, a -> if (a == "DISMISS") vm.dismissPending(p) else vm.fromPending(p, a) }
-                    )
-                    1 -> AccountsScreen(vm, onTransfer = { vm.newDraft("TRANSFER") })
-                    2 -> PlanScreen(vm)
-                    else -> InsightsScreen(vm)
-                }
+              }
             }
         }
-    }
 
-    draft?.let { d ->
-        AddEditTransactionSheet(
-            d, accs, expenseCats, incomeCats, recents, merchants,
-            lookup = { vm.lookup(it) },
-            onAddCategory = { n, k -> vm.addCategory(n, k) },
-            onDismiss = { vm.draft.value = null },
-            onSave = { t, r -> vm.save(t, r, d.pendingId) }
-        )
+        draft?.let { d ->
+            AddEditTransactionSheet(
+                d, accs, heads, usage, likely = { vm.likely(it) }, recents = recents, merchantNames = merchants,
+                lookup = { vm.lookup(it) },
+                people = people, lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },
+                onAddPerson = { n, cb -> vm.addPerson(n, cb) },
+                onAddHead = { n, k, ic -> vm.addHead(n, k, ic) },
+                onDismiss = { vm.draft.value = null },
+                onSave = { t, r -> vm.save(t, r, d.pendingId) }
+            )
+        }
     }
 }

@@ -110,7 +110,7 @@ fun Onboarding(vm: MainViewModel, onDone: () -> Unit) {
                         0 -> {
                             Text("₹", fontSize = 72.sp, fontWeight = FontWeight.Light, color = L.text)
                             Text("Every rupee, tracked on your phone only.", color = L.text, fontSize = 28.sp, fontWeight = FontWeight.Light, lineHeight = 34.sp)
-                            Text("M_Tracker has no internet permission, no account and no cloud. Your money data never leaves this device.", color = L.muted, fontSize = 15.sp, lineHeight = 22.sp)
+                            Text("No account, no cloud, no ads. Your money data never leaves this device. The internet is used only to fetch app updates.", color = L.muted, fontSize = 15.sp, lineHeight = 22.sp)
                             Text("It’s built so logging takes five seconds: a quick keypad, one-tap repeats, reminders after you pay, and a nightly check-in so nothing slips.", color = L.muted, fontSize = 15.sp, lineHeight = 22.sp)
                         }
                         1 -> {

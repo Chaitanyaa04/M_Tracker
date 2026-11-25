@@ -18,6 +18,7 @@ object Extras {
     const val NOTIF_ID = "x_nid"
     const val PKG = "x_pkg"
     const val PENDING = "x_pending"
+    const val OPEN = "x_open"
     const val ACTION_NO_SPEND = "com.mtracker.app.NO_SPEND"
     const val ACTION_WRONG = "com.mtracker.app.WRONG_CALL"
 }
@@ -39,6 +40,13 @@ class AppPrefs private constructor(c: Context) {
     val autoBackup = MutableStateFlow(sp.getBoolean("autobackup", false))
     val backupUri = MutableStateFlow(sp.getString("backupuri", "") ?: "")
     val lastBackup = MutableStateFlow(sp.getLong("lastbackup", 0L))
+    val liveDetect = MutableStateFlow(sp.getBoolean("live", false))          // instant detection needs a status notification
+    val lastScan = MutableStateFlow(sp.getLong("lastscan", 0L))
+    val updateCheck = MutableStateFlow(sp.getBoolean("updcheck", true))
+    val updateRepo = MutableStateFlow(sp.getString("updrepo", "") ?: "")
+    val latestTag = MutableStateFlow(sp.getString("latesttag", "") ?: "")
+    val lastUpdateCheck = MutableStateFlow(sp.getLong("lastupd", 0L))
+    val notifiedTag = MutableStateFlow(sp.getString("notifiedtag", "") ?: "")
 
     private fun load(): Map<String, Long> =
         (sp.getString("apps", "") ?: "").split(";").filter { it.contains("=") }
@@ -57,6 +65,21 @@ class AppPrefs private constructor(c: Context) {
     fun setAutoBackup(v: Boolean) { autoBackup.value = v; sp.edit().putBoolean("autobackup", v).apply() }
     fun setBackupUri(v: String) { backupUri.value = v; sp.edit().putString("backupuri", v).apply() }
     fun setLastBackup(v: Long) { lastBackup.value = v; sp.edit().putLong("lastbackup", v).apply() }
+    fun setLive(v: Boolean) { liveDetect.value = v; sp.edit().putBoolean("live", v).apply() }
+    fun setLastScan(v: Long) { lastScan.value = v; sp.edit().putLong("lastscan", v).apply() }
+    fun setUpdateCheck(v: Boolean) { updateCheck.value = v; sp.edit().putBoolean("updcheck", v).apply() }
+    fun setUpdateRepo(v: String) { updateRepo.value = v.trim(); sp.edit().putString("updrepo", v.trim()).apply() }
+    fun setLatestTag(v: String) { latestTag.value = v; sp.edit().putString("latesttag", v).apply() }
+    fun setLastUpdateCheck(v: Long) { lastUpdateCheck.value = v; sp.edit().putLong("lastupd", v).apply() }
+    fun setNotifiedTag(v: String) { notifiedTag.value = v; sp.edit().putString("notifiedtag", v).apply() }
+    /** Every "Wrong call" makes that app need a longer visit before we ask again. */
+    fun wrongCount(pkg: String): Int = (sp.getString("wrong", "") ?: "").split(";").firstOrNull { it.startsWith("$pkg=") }?.substringAfter("=")?.toIntOrNull() ?: 0
+    fun bumpWrong(pkg: String) {
+        val m = (sp.getString("wrong", "") ?: "").split(";").filter { it.contains("=") }.associate { it.substringBefore("=") to (it.substringAfter("=").toIntOrNull() ?: 0) }.toMutableMap()
+        m[pkg] = (m[pkg] ?: 0) + 1
+        sp.edit().putString("wrong", m.entries.joinToString(";") { "${it.key}=${it.value}" }).apply()
+    }
+    fun minDwellMs(pkg: String): Long = minOf(90_000L, 15_000L + wrongCount(pkg) * 10_000L)
     fun setApp(pkg: String, accountId: Long?) {
         val m = apps.value.toMutableMap()
         if (accountId == null) m.remove(pkg) else m[pkg] = accountId
@@ -103,13 +126,16 @@ object Perms {
 }
 
 object MonitorController {
-    /** Starts/stops the app-launch foreground service to match settings and permissions. */
+    /** Quiet mode (default): a ~15 min background scan, no persistent notification.
+     *  Instant mode (opt-in): foreground service with a small status notification. */
     fun sync(c: Context) {
         val p = AppPrefs.get(c)
-        val want = p.mode.value == "A" && p.apps.value.isNotEmpty() && Perms.usage(c)
+        val have = p.mode.value == "A" && p.apps.value.isNotEmpty() && Perms.usage(c)
+        val live = have && p.liveDetect.value
         val i = Intent(c, AppLaunchMonitorService::class.java)
         try {
-            if (want) ContextCompat.startForegroundService(c, i) else c.stopService(i)
-        } catch (e: Exception) { /* background start restrictions: retried on next app resume */ }
+            if (live) ContextCompat.startForegroundService(c, i) else c.stopService(i)
+        } catch (e: Exception) { /* retried on next app resume */ }
+        UsageScanScheduler.sync(c, have && !p.liveDetect.value)
     }
 }

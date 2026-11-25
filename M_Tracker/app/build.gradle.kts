@@ -13,8 +13,10 @@ android {
         applicationId = "com.mtracker.app"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 3
+        versionName = (project.findProperty("versionName") as String?) ?: "1.2.0"
+        // owner/repo to look for updates in; GitHub Actions fills this in automatically
+        buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "YOUR_USER/M_Tracker"}\"")
     }
 
     // standard  = recommended. No notification-reading code at all (fewer Play Protect flags).
@@ -39,7 +41,10 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 strips the (large) icon pack down to the icons actually used.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (System.getenv("KEYSTORE_FILE") != null) signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -57,6 +62,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.core:core-splashscreen:1.0.1")
     implementation("androidx.activity:activity-compose:1.9.2")

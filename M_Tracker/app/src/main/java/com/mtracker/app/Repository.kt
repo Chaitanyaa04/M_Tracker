@@ -17,8 +17,11 @@ class Repository(private val db: AppDatabase) {
     val recurring = d.recurring()
     val categories = d.categories()
     val dayMarks = d.dayMarks()
+    val persons = d.persons()
 
-    suspend fun save(t: Txn) { if (t.id == 0L) d.insert(t) else d.update(t) }
+    suspend fun save(t: Txn) {
+        if (t.id == 0L) d.insert(if (t.createdAt == 0L) t.copy(createdAt = System.currentTimeMillis()) else t) else d.update(t)
+    }
     suspend fun restore(t: Txn) { d.insert(t) }
     suspend fun delete(t: Txn) = d.delete(t)
 
@@ -68,9 +71,12 @@ class Repository(private val db: AppDatabase) {
 
     suspend fun deleteRecurring(id: Long) = d.deleteRecurring(id)
     suspend fun deletePending(id: Long) = d.deletePending(id)
-    suspend fun addCategory(name: String, kind: String) = d.insertCategory(Category(name.trim(), kind))
+    suspend fun addCategory(name: String, kind: String, icon: String = "") = d.insertCategory(Category(name.trim(), kind, icon))
     suspend fun deleteCategory(name: String, kind: String) = d.deleteCategory(name, kind)
     suspend fun markNoSpend(day: Long) = d.insertMark(DayMark(day))
+    suspend fun addPerson(name: String): Long = d.insertPerson(Person(name = name.trim()))
+    suspend fun deletePerson(id: Long) = db.withTransaction { d.detachPerson(id); d.deletePerson(id) }
+    suspend fun addTxn(t: Txn) { save(t) }
 
     // ---------- CSV (Storage Access Framework URIs; no storage permission) ----------
     private val header = "date,type,amount,merchant,note,category,account,to_account,tag,exclude_from_budget"
