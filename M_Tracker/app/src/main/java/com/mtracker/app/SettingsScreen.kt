@@ -1,5 +1,6 @@
 package com.mtracker.app
 
+import androidx.compose.ui.text.font.FontWeight
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
