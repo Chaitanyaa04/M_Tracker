@@ -1,4 +1,4 @@
-name: Build M_Tracker AUTOFILL APK (optional, manual)
+name: Build Arthak AUTOFILL APK (optional, manual)
 on: workflow_dispatch
 jobs:
   build:
@@ -22,5 +22,5 @@ jobs:
         run: gradle assembleAutofillRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: M_Tracker-autofill-apk
+          name: Arthak-autofill-apk
           path: app/build/outputs/apk/**/*.apk

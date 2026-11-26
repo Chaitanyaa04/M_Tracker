@@ -10,7 +10,7 @@ jobs:
         run: |
           PASS=$(openssl rand -hex 16)
           keytool -genkeypair -v -keystore release.jks -alias mtracker -keyalg RSA -keysize 2048 \
-            -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=M_Tracker, O=Personal, C=IN"
+            -validity 10000 -storepass "$PASS" -keypass "$PASS" -dname "CN=Arthak, O=Personal, C=IN"
           {
             echo "KEYSTORE_PASSWORD=$PASS"
             echo "KEY_PASSWORD=$PASS"
