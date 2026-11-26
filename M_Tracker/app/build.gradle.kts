@@ -16,7 +16,7 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 3
         versionName = (project.findProperty("versionName") as String?) ?: "1.2.0"
         // owner/repo to look for updates in; GitHub Actions fills this in automatically
-        buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "YOUR_USER/M_Tracker"}\"")
+        buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "YOUR_USER/Arthak"}\"")
     }
 
     // standard  = recommended. No notification-reading code at all (fewer Play Protect flags).
