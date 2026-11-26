@@ -197,7 +197,7 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
                         if (t.type == "TRANSFER") HeadTile("Transfer", 38.dp, stored = "swap") else HeadTile(t.category, 38.dp)
                         Spacer(Modifier.width(14.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(if (t.type == "TRANSFER") "Transfer" else t.merchant.ifBlank { t.category }, color = L.text, fontSize = 15.sp, maxLines = 1)
+                            Text(if (t.type == "TRANSFER") "Transfer" else t.note.ifBlank { t.merchant }.ifBlank { t.category }, color = L.text, fontSize = 15.sp, maxLines = 1)
                             Text(
                                 dayLabel(t.date) + if (t.type == "TRANSFER") " · ${names[t.accountId] ?: "?"} → ${t.toAccountId?.let { names[it] } ?: "?"}" else " · ${t.category}",
                                 color = L.muted, fontSize = 12.sp, maxLines = 1

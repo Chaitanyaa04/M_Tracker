@@ -20,6 +20,9 @@ import java.util.Locale
 import kotlin.math.abs
 
 const val OVERALL = "__overall__"
+/** Daily caps live in the same table, with this prefix. */
+const val DAY_PREFIX = "D|"
+const val DAY_OVERALL = "D|__overall__"
 
 fun startOfDay(ms: Long): Long {
     val z = ZoneId.systemDefault()
@@ -40,7 +43,7 @@ data class Draft(
     val merchant: String = "",
     val note: String = "",
     val date: Long = today(),
-    val category: String = "Other",
+    val category: String = "",
     val accountId: Long = 0,
     val toAccountId: Long = 0,
     val tag: String = "",
@@ -108,8 +111,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** One-tap repeats: newest distinct merchant+amount combos. */
     val recents = txns.map { l ->
-        l.filter { (it.type == "EXPENSE" || it.type == "INCOME") && it.merchant.isNotBlank() }
-            .distinctBy { it.type + it.merchant.lowercase() + it.amount }.take(12)
+        l.filter { (it.type == "EXPENSE" || it.type == "INCOME") && (it.merchant.isNotBlank() || it.note.isNotBlank()) }
+            .distinctBy { it.type + it.note.lowercase() + it.merchant.lowercase() + it.amount }.take(12)
     }.eager(emptyList())
 
     /** Merchant names, most used first (powers autocomplete). */
@@ -216,7 +219,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val txt = app.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
             BackupManager.restore(AppDatabase.get(app), txt)
         }
-        done(r.fold({ "Restored $it transactions" }, { "Restore failed: not an M_Tracker backup" }))
+        done(r.fold({ "Restored $it transactions" }, { "Restore failed: not an Arthak backup" }))
     }
 
     fun backupNow(done: (String) -> Unit) = viewModelScope.launch {
@@ -233,6 +236,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addPerson(name: String, done: (Long) -> Unit = {}) = viewModelScope.launch { if (name.isNotBlank()) done(repo.addPerson(name)) }
     fun deletePerson(id: Long) = viewModelScope.launch { repo.deletePerson(id) }
+    fun savePerson(p: Person) = viewModelScope.launch { repo.savePerson(p) }
 
     /** kind: GIVE (money leaves your account, they owe you more), RECEIVE (money comes in, they owe you less),
      *  THEY_PAID (they paid something for you; no account involved, you owe them more). */
@@ -240,7 +244,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val t = when (kind) {
             "GIVE" -> Txn(type = "PERSON_OUT", amount = amount, note = note, date = today(), category = "People", accountId = accountId, personId = personId, owed = amount)
             "RECEIVE" -> Txn(type = "PERSON_IN", amount = amount, note = note, date = today(), category = "People", accountId = accountId, personId = personId, owed = -amount)
-            else -> Txn(type = "PERSON_ADJ", amount = amount, note = note, date = today(), category = "People", accountId = 0, personId = personId, owed = -amount)
+            else -> if (accountId != 0L)
+                Txn(type = "PERSON_IN", amount = amount, note = note, date = today(), category = "People", accountId = accountId, personId = personId, owed = -amount)
+            else Txn(type = "PERSON_ADJ", amount = amount, note = note, date = today(), category = "People", accountId = 0, personId = personId, owed = -amount)
         }
         repo.addTxn(t)
     }

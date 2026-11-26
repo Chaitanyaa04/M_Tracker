@@ -2,6 +2,12 @@ package com.mtracker.app
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -61,6 +67,8 @@ fun InsightsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
     var cFrom by rememberSaveable { mutableLongStateOf(0L) }
     var cTo by rememberSaveable { mutableLongStateOf(0L) }
     var showRange by remember { mutableStateOf(false) }
+    var period by remember { mutableStateOf<Triple<String, Long, Long>?>(null) }
+    val peopleNames by vm.peopleNames.collectAsState()
     var flowMode by rememberSaveable { mutableIntStateOf(0) }
     val ranges = listOf("1M" to 1, "3M" to 3, "6M" to 6, "1Y" to 12, "All" to 0)
 
@@ -124,16 +132,18 @@ fun InsightsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
             Column(Modifier.padding(24.dp, 20.dp)) {
                 Cap("Activity · last 16 weeks")
                 Spacer(Modifier.height(12.dp))
-                Heatmap(spendByDay, logged)
+                Heatmap(spendByDay, logged) { d -> period = Triple(dayLabel(d), d, dayMillis(java.time.Instant.ofEpochMilli(d).atZone(ZoneId.systemDefault()).toLocalDate().plusDays(1))) }
             }
             Hairline()
         }
-        item { CashFlow(txns, flowMode) { flowMode = it } }
+        item { CashFlow(txns, flowMode, { flowMode = it }, { l, a, b -> period = Triple(l, a, b) }) }
         item { Ranked("Spend by head", cats, heads = true) }
         item { Ranked("Top merchants", merchants) }
         item { Ranked("Spend by tag", tags) }
         item { Spacer(Modifier.height(96.dp)) }
     }
+
+    period?.let { PeriodSheet(it.first, it.second, it.third, vm) { period = null } }
 
     if (showRange) {
         val st = rememberDateRangePickerState()
@@ -171,35 +181,107 @@ fun TrendChart(v: List<Double>) {
 }
 
 @Composable
-fun CashFlow(txns: List<Txn>, mode: Int, onMode: (Int) -> Unit) {
+fun CashFlow(txns: List<Txn>, mode: Int, onMode: (Int) -> Unit, onOpen: (String, Long, Long) -> Unit) {
     val flows = remember(txns) { txns.filter { it.type == "EXPENSE" || it.type == "INCOME" } }
-    fun net(a: Long, b: Long) = flows.filter { it.date >= a && it.date < b }.sumOf { if (it.type == "INCOME") it.amount else -it.amount }
-    val rows: List<Pair<String, Double>> = if (mode == 0) (0..6).map { k ->
+    fun net(a: Long, b: Long) = flows.filter { it.date >= a && it.date < b }.sumOf { if (it.type == "INCOME") it.amount else -it.myAmount }
+    val rows: List<Triple<String, Double, Pair<Long, Long>>> = if (mode == 0) (0..6).map { k ->
         val d = LocalDate.now().minusDays(k.toLong())
-        d.format(DateTimeFormatter.ofPattern("EEEE", Locale.ENGLISH)) to net(dayMillis(d), dayMillis(d.plusDays(1)))
+        val a = dayMillis(d); val b = dayMillis(d.plusDays(1))
+        Triple(d.format(DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH)), net(a, b), a to b)
     } else (0..5).map { k ->
         val d = LocalDate.now().withDayOfMonth(1).minusMonths(k.toLong())
-        d.format(DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)) to net(dayMillis(d), dayMillis(d.plusMonths(1)))
+        val a = dayMillis(d); val b = dayMillis(d.plusMonths(1))
+        Triple(d.format(DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH)), net(a, b), a to b)
     }
     Column {
         Row(Modifier.fillMaxWidth().padding(24.dp, 24.dp, 24.dp, 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Cap("Cash flow")
+            Cap("Cash flow · tap for details")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Chip("Day", mode == 0) { onMode(0) }
                 Chip("Month", mode == 1) { onMode(1) }
             }
         }
         Hairline()
-        rows.forEach { (label, v) ->
-            Row(Modifier.fillMaxWidth().padding(24.dp, 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(label, color = L.text, fontSize = 14.sp)
+        rows.forEach { (label, v, range) ->
+            Row(Modifier.fillMaxWidth().clickable { onOpen(label, range.first, range.second) }.padding(24.dp, 13.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = L.text, fontSize = 14.sp, modifier = Modifier.weight(1f))
                 Num(
                     if (v > 0.004) "+" + inr(v) else if (v < -0.004) "−" + inr(v) else inr(0.0), size = 14.sp,
                     color = if (v > 0.004) L.green else if (v < -0.004) L.red else L.muted
                 )
+                Text("  ›", color = L.muted, fontSize = 18.sp)
             }
             Hairline()
         }
+    }
+}
+
+/** Everything logged in a chosen day or month. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PeriodSheet(label: String, from: Long, to: Long, vm: MainViewModel, onDismiss: () -> Unit) {
+    val txns by vm.txns.collectAsState()
+    val accs by vm.accounts.collectAsState()
+    val people by vm.peopleNames.collectAsState()
+    val names = remember(accs) { accs.associate { it.id to it.name } }
+    val list = txns.filter { it.date >= from && it.date < to }
+    val out = list.filter { it.type == "EXPENSE" }.sumOf { it.myAmount }
+    val inc = list.filter { it.type == "INCOME" }.sumOf { it.amount }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        containerColor = L.surface, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Cap(label, color = L.text)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column { Cap("Expense"); Spacer(Modifier.height(4.dp)); Num(inr(out), size = 18.sp) }
+                Column { Cap("Income"); Spacer(Modifier.height(4.dp)); Num(inr(inc), size = 18.sp, color = L.green) }
+                Column(horizontalAlignment = Alignment.End) { Cap("Net"); Spacer(Modifier.height(4.dp)); Num(inrS(inc - out), size = 18.sp) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Hairline()
+        LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+            if (list.isEmpty()) item { Text("Nothing logged.", color = L.muted, fontSize = 14.sp, modifier = Modifier.padding(24.dp)) }
+            items(list, key = { it.id }) { t -> PeriodLine(t, names, people) }
+        }
+    }
+}
+
+@Composable
+private fun PeriodLine(t: Txn, names: Map<Long, String>, people: Map<Long, String>) {
+    val who = people[t.personId]
+    val title = when (t.type) {
+        "TRANSFER" -> "Transfer"
+        "PERSON_OUT" -> "Lent to ${who ?: "someone"}"
+        "PERSON_IN" -> "Received from ${who ?: "someone"}"
+        "PERSON_ADJ" -> "${who ?: "Someone"} paid for you"
+        else -> t.note.ifBlank { t.merchant }.ifBlank { t.category }
+    }
+    val sub = listOfNotNull(
+        dayLabel(t.date), t.merchant.takeIf { it.isNotBlank() && it != title },
+        if (t.type.startsWith("PERSON") || t.type == "TRANSFER") null else t.category, names[t.accountId]
+    ).joinToString(" · ")
+    Column {
+        Row(Modifier.fillMaxWidth().padding(24.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                t.type == "TRANSFER" -> HeadTile("Transfer", 40.dp, stored = "swap")
+                t.type.startsWith("PERSON") -> HeadTile(who ?: "People", 40.dp, stored = "person")
+                else -> HeadTile(t.category, 40.dp)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = L.text, fontSize = 15.sp, maxLines = 1)
+                Text(sub, color = L.muted, fontSize = 12.sp, maxLines = 1)
+            }
+            Spacer(Modifier.width(10.dp))
+            when (t.type) {
+                "INCOME", "PERSON_IN" -> Num("+" + inr(t.amount), color = L.green)
+                "EXPENSE", "PERSON_OUT" -> Num("−" + inr(t.amount))
+                else -> Num(inr(t.amount), color = L.muted)
+            }
+        }
+        Hairline(Modifier.padding(start = 74.dp))
     }
 }
 
@@ -232,14 +314,26 @@ fun Ranked(title: String, rows: List<Pair<String, Double>>, limit: Int = 8, head
 
 /** 16 weeks of days: filled = spent (darker = more), green dot = logged a no-spend day, outline = nothing logged. */
 @Composable
-fun Heatmap(spendByDay: Map<Long, Double>, logged: Set<Long>) {
+fun Heatmap(spendByDay: Map<Long, Double>, logged: Set<Long>, onDay: (Long) -> Unit) {
     val weeks = 16
     val first = LocalDate.now().with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).minusWeeks((weeks - 1).toLong())
     val today = LocalDate.now()
     val mx = spendByDay.values.maxOrNull() ?: 1.0
     val ink = L.text; val line = L.border; val green = L.green
     Column {
-        Canvas(Modifier.fillMaxWidth().height(132.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth().height(132.dp).pointerInput(Unit) {
+                detectTapGestures { o ->
+                    val gap = 4.dp.toPx()
+                    val cell = (size.width - gap * (weeks - 1)) / weeks
+                    val c = (o.x / (cell + gap)).toInt(); val r = (o.y / (cell + gap)).toInt()
+                    if (c in 0 until weeks && r in 0 until 7) {
+                        val d = first.plusDays((c * 7 + r).toLong())
+                        if (!d.isAfter(today)) onDay(dayMillis(d))
+                    }
+                }
+            }
+        ) {
             val gap = 4.dp.toPx()
             val cell = (size.width - gap * (weeks - 1)) / weeks
             for (c in 0 until weeks) for (r in 0 until 7) {
@@ -257,6 +351,6 @@ fun Heatmap(spendByDay: Map<Long, Double>, logged: Set<Long>) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text("Darker = spent more · green = no-spend day · outline = nothing logged", color = L.muted, fontSize = 11.sp)
+        Text("Tap a day to see it. Darker = spent more · green = no-spend day · outline = nothing logged", color = L.muted, fontSize = 11.sp)
     }
 }

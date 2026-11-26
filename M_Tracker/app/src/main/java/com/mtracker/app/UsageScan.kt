@@ -54,7 +54,8 @@ class UsageScanWorker(ctx: Context, p: WorkerParameters) : CoroutineWorker(ctx, 
         var added = 0
         for ((pkg, start, dur) in visits.sortedBy { it.second }) {
             if (dur < p.minDwellMs(pkg)) continue                                  // a glance, not a payment
-            if (dao.countRecent(pkg, start - 5 * 60_000) > 0) continue              // same visit / too soon after the last one
+            if (start - p.lastPrompt(pkg) < p.cooldownMs()) continue                // still inside the quiet period
+            p.setPrompt(pkg, start)
             dao.insertPending(Pending(time = start, pkg = pkg, label = Perms.label(c, pkg), accountId = apps[pkg] ?: 0L))
             added++
         }

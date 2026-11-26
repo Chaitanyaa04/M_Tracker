@@ -60,7 +60,7 @@ class AppLaunchMonitorService : Service() {
     private fun handle(pkg: String, p: AppPrefs) {
         val accId = p.apps.value[pkg] ?: return
         val delayMs = p.delaySec.value * 1000L
-        if (!Cooldown.tryStart(pkg, maxOf(delayMs + 30_000, 5 * 60_000L))) return
+        if (!Cooldown.tryStart(pkg, maxOf(p.cooldownMs(), delayMs + 5_000))) return
         scope.launch {
             delay(delayMs)
             if (p.mode.value == "A") {

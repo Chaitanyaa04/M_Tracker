@@ -1,6 +1,13 @@
 package com.mtracker.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -44,6 +51,8 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     val hide by vm.prefs.hideBalances.collectAsState()
     var openId by rememberSaveable { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }
+    var editingPerson by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     fun m(s: String) = if (hide) "••••" else s
     val person = people.firstOrNull { it.id == openId }
@@ -70,7 +79,7 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                             Avatar(p.name)
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(p.name, color = L.text, fontSize = 16.sp)
+                                Text(p.name + if (p.relation.isNotBlank()) " · ${p.relation}" else "", color = L.text, fontSize = 16.sp)
                                 Text(m(balanceText(b)), color = if (b > 0.004) L.green else if (b < -0.004) L.red else L.muted, fontSize = 12.sp)
                             }
                             Text("›", color = L.muted, fontSize = 22.sp)
@@ -88,25 +97,32 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
         LazyColumn(modifier.fillMaxSize()) {
             item {
                 Column(Modifier.padding(24.dp, 4.dp, 24.dp, 16.dp)) {
-                    Cap("‹  All people", Modifier.clickable { openId = 0 }.padding(vertical = 8.dp), color = L.text)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Cap("‹  All people", Modifier.clickable { openId = 0 }.padding(vertical = 8.dp), color = L.text)
+                        Cap("Edit", Modifier.clickable { editingPerson = true }.padding(8.dp), color = L.text)
+                    }
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Avatar(person.name, 56); Spacer(Modifier.width(16.dp))
                         Column {
                             Text(person.name, color = L.text, fontSize = 22.sp)
                             Text(m(balanceText(b)), color = if (b > 0.004) L.green else if (b < -0.004) L.red else L.muted, fontSize = 14.sp)
+                            val meta = listOfNotNull(person.relation.takeIf { it.isNotBlank() }, person.phone.takeIf { it.isNotBlank() }).joinToString(" · ")
+                            if (meta.isNotBlank()) Text(meta, color = L.muted, fontSize = 12.sp)
                         }
                     }
                     Spacer(Modifier.height(18.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MonoButton("I gave", { dialog = "GIVE" }, Modifier.weight(1f))
-                        MonoButton("I got", { dialog = "RECEIVE" }, Modifier.weight(1f), filled = false)
-                        MonoButton("They paid", { dialog = "THEY_PAID" }, Modifier.weight(1f), filled = false)
+                        MonoButton("Lend", { dialog = "GIVE" }, Modifier.weight(1f))
+                        MonoButton("Repaid", { dialog = "RECEIVE" }, Modifier.weight(1f), filled = false)
+                        MonoButton("Borrow", { dialog = "THEY_PAID" }, Modifier.weight(1f), filled = false)
                     }
                     if (abs(b) > 0.004) {
                         Spacer(Modifier.height(10.dp))
                         MonoButton(if (b > 0) "Settle up · they pay ${inr(b)}" else "Settle up · you pay ${inr(b)}", { dialog = if (b > 0) "RECEIVE" else "GIVE" }, Modifier.fillMaxWidth(), filled = false)
+                        if (b > 0) { Spacer(Modifier.height(8.dp)); MonoButton("Send a reminder", { remind(ctx, person, b) }, Modifier.fillMaxWidth(), filled = false) }
                     }
+                    if (person.note.isNotBlank()) { Spacer(Modifier.height(12.dp)); Text(person.note, color = L.muted, fontSize = 13.sp, lineHeight = 18.sp) }
                 }
             }
             item(key = "hist") { Cap("History", Modifier.padding(24.dp, 8.dp, 24.dp, 8.dp)) }
@@ -115,14 +131,14 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                 Panel(Modifier.padding(horizontal = 16.dp)) {
                     mine.forEachIndexed { i, t ->
                         val title = when (t.type) {
-                            "PERSON_OUT" -> "You gave money"
-                            "PERSON_IN" -> "You got money"
-                            "PERSON_ADJ" -> "They paid for you"
-                            else -> t.merchant.ifBlank { t.note.ifBlank { t.category } }
+                            "PERSON_OUT" -> "Lent"
+                            "PERSON_IN" -> "Received"
+                            "PERSON_ADJ" -> "Borrowed"
+                            else -> t.note.ifBlank { t.merchant }.ifBlank { t.category }
                         }
                         val sub = dayLabel(t.date) + when {
-                            t.type == "EXPENSE" && t.owed >= t.amount - 0.005 && t.owed > 0 -> " · you paid ${inr(t.amount)} for them"
-                            t.type == "EXPENSE" && t.owed > 0 -> " · bill ${inr(t.amount)}, split"
+                            t.type == "EXPENSE" && t.owed >= t.amount - 0.005 && t.owed > 0 -> " · you covered ${inr(t.amount)}"
+                            t.type == "EXPENSE" && t.owed > 0 -> " · bill ${inr(t.amount)} split"
                             t.type == "EXPENSE" -> " · noted only (${inr(t.amount)})"
                             t.note.isNotBlank() -> " · ${t.note}"
                             else -> ""
@@ -149,36 +165,36 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
         }
     }
 
-    if (adding) {
-        var nm by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { adding = false }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
-            title = { Cap("Add a person", color = L.text) },
-            text = { Field("Name", nm, { nm = it }) },
-            confirmButton = { TextButton({ if (nm.isNotBlank()) { vm.addPerson(nm.trim()); adding = false } }) { Text("Add") } },
-            dismissButton = { TextButton({ adding = false }) { Text("Cancel") } }
-        )
-    }
+    if (adding) PersonDialog(null, false, { adding = false }, { vm.savePerson(it); adding = false }, {})
+    if (editingPerson && person != null) PersonDialog(
+        person, abs(bal[person.id] ?: 0.0) < 0.005, { editingPerson = false }, { vm.savePerson(it); editingPerson = false },
+        { vm.deletePerson(person.id); openId = 0; editingPerson = false }
+    )
     dialog?.let { kind ->
         val b = person?.let { bal[it.id] } ?: 0.0
         val name = person?.name ?: ""
         var amt by remember(kind) { mutableStateOf(if (abs(b) > 0.004 && ((kind == "RECEIVE" && b > 0) || (kind == "GIVE" && b < 0))) fmtAmt(abs(b)) else "") }
-        var acc by remember(kind) { mutableLongStateOf(accs.firstOrNull()?.id ?: 0L) }
+        var acc by remember(kind) { mutableLongStateOf(if (kind == "THEY_PAID") 0L else accs.firstOrNull()?.id ?: 0L) }
+        val accList = (if (kind == "THEY_PAID") listOf("No account (they paid directly)" to 0L) else emptyList()) + accs.map { it.name to it.id }
         var note by remember(kind) { mutableStateOf("") }
-        val title = when (kind) { "GIVE" -> "You gave $name money"; "RECEIVE" -> "$name gave you money"; else -> "$name paid for you" }
+        val title = when (kind) {
+            "GIVE" -> "Lend to $name"
+            "RECEIVE" -> "$name repaid you"
+            else -> "Borrow from $name"
+        }
         AlertDialog(
             onDismissRequest = { dialog = null }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
             title = { Cap(title, color = L.text) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Field("Amount (INR)", amt, { amt = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, kb = KeyboardType.Decimal)
-                    if (kind != "THEY_PAID") Picker("Account", accs.firstOrNull { it.id == acc }?.name ?: "Select", accs.map { it.name to it.id }, { acc = it })
+                    Picker("Account", accList.firstOrNull { it.second == acc }?.first ?: "Select", accList, { acc = it })
                     Field("Note (optional)", note, { note = it })
                     Text(
                         when (kind) {
-                            "GIVE" -> "Money leaves the account. $name owes you more (or you owe less)."
-                            "RECEIVE" -> "Money comes into the account. $name owes you less (or you owe more)."
-                            else -> "No account is touched. You now owe $name this amount."
+                            "GIVE" -> "Money leaves the account. $name owes you more."
+                            "RECEIVE" -> "Money comes in. $name owes you less."
+                            else -> "You owe $name more. Pick an account only if they handed you cash."
                         }, color = L.muted, fontSize = 12.sp, lineHeight = 17.sp
                     )
                 }
@@ -192,4 +208,42 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
             dismissButton = { TextButton({ dialog = null }) { Text("Cancel") } }
         )
     }
+}
+
+@Composable
+fun PersonDialog(person: Person?, canRemove: Boolean, onDismiss: () -> Unit, onSave: (Person) -> Unit, onDelete: () -> Unit) {
+    var name by remember { mutableStateOf(person?.name ?: "") }
+    var relation by remember { mutableStateOf(person?.relation ?: "") }
+    var phone by remember { mutableStateOf(person?.phone ?: "") }
+    var note by remember { mutableStateOf(person?.note ?: "") }
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
+        title = { Cap(if (person == null) "New person" else "Edit person", color = L.text) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Field("Name", name, { name = it })
+                Cap("Relation")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Family", "Friend", "Colleague", "Other").forEach { r -> Chip(r, relation == r) { relation = if (relation == r) "" else r } }
+                }
+                Field("Phone (optional)", phone, { phone = it.filter { c -> c.isDigit() || c == '+' || c == ' ' }.take(16) }, kb = KeyboardType.Phone)
+                Field("Note (optional)", note, { note = it })
+            }
+        },
+        confirmButton = { TextButton({ if (name.isNotBlank()) onSave(Person(person?.id ?: 0, name.trim(), relation, phone.trim(), note.trim())) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                if (person != null && canRemove) TextButton(onDelete) { Text("Remove", color = L.red) }
+                TextButton(onDismiss) { Text("Cancel") }
+            }
+        }
+    )
+}
+
+/** Opens a pre-written message: SMS to their number if saved, otherwise the share sheet (WhatsApp etc.). */
+fun remind(c: Context, p: Person, amount: Double) {
+    val text = "Hi ${p.name}, a gentle reminder about the ${inr(amount)} we need to settle. Thanks!"
+    val i = if (p.phone.isNotBlank()) Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + p.phone.filter { it.isDigit() || it == '+' })).putExtra("sms_body", text)
+    else Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Remind via")
+    runCatching { c.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }

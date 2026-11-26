@@ -62,7 +62,7 @@ object Updater {
         val conn = URL("https://api.github.com/repos/$r/releases/latest").openConnection() as HttpURLConnection
         conn.connectTimeout = 10_000; conn.readTimeout = 15_000
         conn.setRequestProperty("Accept", "application/vnd.github+json")
-        conn.setRequestProperty("User-Agent", "M_Tracker")
+        conn.setRequestProperty("User-Agent", "Arthak")
         if (conn.responseCode != 200) throw IllegalStateException("GitHub answered ${conn.responseCode}. Is the repository public and does it have a release?")
         val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
         val assets = o.optJSONArray("assets") ?: return@withContext null
@@ -100,17 +100,17 @@ object Updater {
             app.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + app.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            state.value = UpdState.Error("Allow “Install unknown apps” for M_Tracker, then tap Update again.")
+            state.value = UpdState.Error("Allow “Install unknown apps” for Arthak, then tap Update again.")
             return
         }
         scope.launch {
             try {
                 state.value = UpdState.Downloading(0)
                 val dir = File(app.cacheDir, "updates").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
-                val file = File(dir, "M_Tracker-${info.tag}.apk")
+                val file = File(dir, "Arthak-${info.tag}.apk")
                 val conn = URL(info.apkUrl).openConnection() as HttpURLConnection
                 conn.connectTimeout = 15_000; conn.readTimeout = 30_000
-                conn.setRequestProperty("User-Agent", "M_Tracker")
+                conn.setRequestProperty("User-Agent", "Arthak")
                 val total = conn.contentLengthLong.takeIf { it > 0 } ?: info.size
                 conn.inputStream.use { input ->
                     file.outputStream().use { out ->

@@ -77,7 +77,8 @@ fun LedgerScreen(
     val counted = txns.filter { it.type == "EXPENSE" && !it.excludeFromBudget && it.date >= monthStart() }
     val spentToday = counted.filter { it.date == today() }.sumOf { it.myAmount }
     val spentBefore = counted.sumOf { it.myAmount } - spentToday
-    val safeToday = overall?.let { maxOf(0.0, it - spentBefore) / daysLeft }
+    val dailyCap = budgets.firstOrNull { it.name == DAY_OVERALL }?.amount
+    val safeToday = dailyCap ?: overall?.let { maxOf(0.0, it - spentBefore) / daysLeft }
 
     LazyColumn(modifier.fillMaxSize()) {
         item {
@@ -93,7 +94,7 @@ fun LedgerScreen(
                 Spacer(Modifier.height(10.dp))
                 if (offset == 0 && safeToday != null && !searching) {
                     val remaining = safeToday - spentToday
-                    HeroCard(remaining, safeToday, spentToday, daysLeft, maxOf(0.0, (overall ?: 0.0) - spentBefore - spentToday))
+                    HeroCard(remaining, safeToday, spentToday, daysLeft, overall?.let { maxOf(0.0, it - spentBefore - spentToday) })
                     Spacer(Modifier.height(12.dp))
                     Num("Net spend ${inrS(out - inc)}  ·  Out ${inr(out)}  ·  In ${inr(inc)}", size = 12.sp, color = L.muted)
                 } else {
@@ -102,8 +103,8 @@ fun LedgerScreen(
                     Num(inrS(out - inc), size = 52.sp, weight = FontWeight.Light)
                     Spacer(Modifier.height(4.dp))
                     Num("Out ${inr(out)}  ·  In ${inr(inc)}", size = 13.sp, color = L.muted)
-                    if (offset == 0 && overall == null && !searching)
-                        Text("Set an overall monthly budget in Plan to see your daily safe-to-spend.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    if (offset == 0 && overall == null && dailyCap == null && !searching)
+                        Text("Set a daily or monthly limit in Plan to see what’s safe to spend today.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 }
                 if (offset == 0) {
                     Spacer(Modifier.height(16.dp))
@@ -216,17 +217,17 @@ fun TxnRow(
             val isPerson = t.type.startsWith("PERSON")
             val title = when (t.type) {
                 "TRANSFER" -> "Transfer"
-                "PERSON_OUT" -> "Gave ${who ?: "someone"}"
-                "PERSON_IN" -> "Got from ${who ?: "someone"}"
+                "PERSON_OUT" -> "Lent to ${who ?: "someone"}"
+                "PERSON_IN" -> "Received from ${who ?: "someone"}"
                 "PERSON_ADJ" -> "${who ?: "Someone"} paid for you"
-                else -> t.merchant.ifBlank { t.note.ifBlank { t.category } }
+                else -> t.note.ifBlank { t.merchant }.ifBlank { t.category }
             }
             val n = itemCount(t.items)
             val sub = when {
                 t.type == "TRANSFER" -> "${names[t.accountId] ?: "?"} → ${t.toAccountId?.let { names[it] } ?: "?"}"
                 isPerson -> listOfNotNull(names[t.accountId], t.note.takeIf { it.isNotBlank() }).joinToString(" · ").ifBlank { "People" }
                 else -> listOfNotNull(
-                    t.category, names[t.accountId],
+                    t.merchant.takeIf { it.isNotBlank() && it != title }, t.category, names[t.accountId],
                     if (t.routeFrom.isNotBlank()) "${t.routeFrom} → ${t.routeTo}" else null,
                     if (n > 0) "$n items" else null,
                     who?.let { w -> if (t.owed >= t.amount - 0.005 && t.owed > 0) "$w owes all" else if (t.owed > 0) "split with $w" else "with $w" },
@@ -260,7 +261,7 @@ fun TxnRow(
 
 /** Today's safe-to-spend as a calm ring. */
 @Composable
-fun HeroCard(remaining: Double, safe: Double, spentToday: Double, daysLeft: Int, monthLeft: Double) {
+fun HeroCard(remaining: Double, safe: Double, spentToday: Double, daysLeft: Int, monthLeft: Double?) {
     val over = remaining < 0
     val frac = if (safe > 0) min(1.0, spentToday / safe).toFloat() else if (spentToday > 0) 1f else 0f
     val ring by androidx.compose.animation.core.animateFloatAsState(frac, androidx.compose.animation.core.tween(900), label = "ring")
@@ -279,7 +280,7 @@ fun HeroCard(remaining: Double, safe: Double, spentToday: Double, daysLeft: Int,
             Num((if (shown < 0) "−" else "") + inr(shown.toDouble()), size = 36.sp, weight = FontWeight.Light, color = if (over) L.red else L.text)
             Spacer(Modifier.height(8.dp))
             Text("${inr(spentToday)} spent of ${inr(safe)}", color = L.muted, fontSize = 12.sp)
-            Text("${inr(monthLeft)} left this month · $daysLeft days", color = L.muted, fontSize = 12.sp)
+            if (monthLeft != null) Text("${inr(monthLeft)} left this month · $daysLeft days", color = L.muted, fontSize = 12.sp)
         }
         androidx.compose.foundation.Canvas(Modifier.size(84.dp)) {
             val w = 9.dp.toPx()

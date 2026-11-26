@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -11,17 +12,48 @@ import kotlinx.coroutines.launch
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
         val nid = i.getIntExtra(Extras.NOTIF_ID, -1)
+        val pid = i.getLongExtra(Extras.PENDING, 0L)
+        val acc = i.getLongExtra(Extras.ACCOUNT, 0L)
+        val nm = NotificationManagerCompat.from(c)
         when (i.action) {
-            // "Wrong Call": dismiss silently, log nothing, forget the pending prompt, reset cooldown.
+            // Wrong call: forget this prompt and teach the detector to be a little less eager for this app.
+            // The quiet period is NOT reset, so it can't ping again straight away.
             Extras.ACTION_WRONG -> {
-                NotificationManagerCompat.from(c).cancel(nid)
-                i.getStringExtra(Extras.PKG)?.let { Cooldown.reset(it); AppPrefs.get(c).bumpWrong(it) }
-                val pid = i.getLongExtra(Extras.PENDING, 0L)
+                nm.cancel(nid)
+                i.getStringExtra(Extras.PKG)?.let { AppPrefs.get(c).bumpWrong(it) }
                 if (pid != 0L) async(c) { it.dao().deletePending(pid) }
+            }
+            // One tap: log the same expense as last time on this account.
+            Extras.ACTION_SAME -> {
+                nm.cancel(nid)
+                async(c) { db ->
+                    val d = db.dao()
+                    val last = d.lastExpenseFor(acc)
+                    if (last != null) {
+                        d.insert(last.copy(id = 0, date = today(), createdAt = System.currentTimeMillis(), personId = 0, owed = 0.0, items = "", routeFrom = "", routeTo = ""))
+                        if (pid != 0L) d.deletePending(pid)
+                        ReminderNotifier.confirm(c, "${inr(last.amount)} · " + last.note.ifBlank { last.merchant }.ifBlank { last.category })
+                    }
+                }
+            }
+            // Type just the amount in the notification; the head defaults to what you last used on this account.
+            Extras.ACTION_AMOUNT -> {
+                val typed = RemoteInput.getResultsFromIntent(i)?.getCharSequence("amount")?.toString().orEmpty()
+                val amt = typed.filter { it.isDigit() || it == '.' }.toDoubleOrNull()
+                if (amt == null || amt <= 0) { nm.cancel(nid); return }
+                nm.cancel(nid)
+                async(c) { db ->
+                    val d = db.dao()
+                    val account = if (acc != 0L) acc else d.allAccounts().firstOrNull()?.id ?: return@async
+                    val head = d.lastExpenseFor(account)?.category ?: "Other"
+                    d.insert(Txn(type = "EXPENSE", amount = round2(amt), date = today(), category = head, accountId = account, createdAt = System.currentTimeMillis()))
+                    if (pid != 0L) d.deletePending(pid)
+                    ReminderNotifier.confirm(c, "${inr(amt)} · $head. Open the app to add a title.")
+                }
             }
             // Evening check-in: confirm a zero-spend day (keeps the streak alive).
             Extras.ACTION_NO_SPEND -> {
-                NotificationManagerCompat.from(c).cancel(nid)
+                nm.cancel(nid)
                 async(c) { it.dao().insertMark(DayMark(today())) }
             }
         }

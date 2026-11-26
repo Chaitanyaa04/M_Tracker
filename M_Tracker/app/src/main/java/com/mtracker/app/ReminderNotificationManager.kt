@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,22 +35,26 @@ object ReminderNotifier {
     fun ensureChannels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH, "Payment reminders", NotificationManager.IMPORTANCE_HIGH))
-        nm.createNotificationChannel(NotificationChannel(CH_MONITOR, "App-launch guard", NotificationManager.IMPORTANCE_MIN))
+        nm.createNotificationChannel(NotificationChannel(CH_MONITOR, "Instant detection status", NotificationManager.IMPORTANCE_MIN))
         nm.createNotificationChannel(NotificationChannel(CH_CHECKIN, "Daily check-in", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, "App updates", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, "Updates & confirmations", NotificationManager.IMPORTANCE_LOW))
     }
 
-    /** Saves the prompt as an "unlogged payment" FIRST, so it can't be forgotten, then notifies. */
+    /**
+     * One prompt per quiet period (you choose 10 s to 10 min). A repeat trigger inside it is ignored even if you
+     * already dismissed the first one. A prompt that carries its own amount is a different payment, so it always passes.
+     */
     fun show(c: Context, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?) {
         val app = c.applicationContext
         scope.launch {
+            val p = AppPrefs.get(app)
+            val now = System.currentTimeMillis()
+            if (amount == null && now - p.lastPrompt(pkg) < p.cooldownMs()) return@launch
+            p.setPrompt(pkg, now)
             val dao = AppDatabase.get(app).dao()
-            // Same app triggered again within 5 minutes? That's the same visit (or a wrong call): stay quiet.
-            if (dao.countRecent(pkg, System.currentTimeMillis() - 5 * 60_000) > 0) return@launch
-            val pid = dao.insertPending(
-                Pending(time = System.currentTimeMillis(), pkg = pkg, label = label, accountId = accountId, amount = amount, merchant = merchant)
-            )
-            post(app, pid, pkg, label, accountId, amount, merchant)
+            val pid = dao.insertPending(Pending(time = now, pkg = pkg, label = label, accountId = accountId, amount = amount, merchant = merchant))
+            val last = if (accountId != 0L) dao.lastExpenseFor(accountId) else null
+            post(app, pid, pkg, label, accountId, amount, merchant, last)
         }
     }
 
@@ -72,51 +77,71 @@ object ReminderNotifier {
         if (!nm.areNotificationsEnabled()) return
         nm.notify(5, NotificationCompat.Builder(c, CH_UPDATE)
             .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle("M_Tracker $tag is ready")
+            .setContentTitle("Arthak $tag is ready")
             .setContentText("Tap to update. It takes a few seconds.")
             .setAutoCancel(true)
             .setContentIntent(activityPi(c, 8002, null) { putExtra(Extras.OPEN, "updates") }).build())
     }
 
+    /** Brief "logged" receipt after a one-tap action; removes itself after a few seconds. */
     @SuppressLint("MissingPermission")
-    private fun post(c: Context, pid: Long, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?) {
+    fun confirm(c: Context, text: String) {
+        ensureChannels(c)
+        val nm = NotificationManagerCompat.from(c)
+        if (!nm.areNotificationsEnabled()) return
+        nm.notify(6, NotificationCompat.Builder(c, CH_UPDATE)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Logged")
+            .setContentText(text)
+            .setAutoCancel(true).setTimeoutAfter(6_000)
+            .setContentIntent(activityPi(c, 8003, null)).build())
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun post(c: Context, pid: Long, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?, last: Txn?) {
         ensureChannels(c)
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
         val nid = pid.toInt()
 
-        fun act(type: String, rc: Int) = activityPi(c, nid * 4 + rc, type) {
+        fun act(type: String, rc: Int) = activityPi(c, nid * 8 + rc, type) {
             putExtra(Extras.ACCOUNT, accountId)
             putExtra(Extras.NOTIF_ID, nid)
             putExtra(Extras.PENDING, pid)
             if (amount != null) putExtra(Extras.AMOUNT, amount)
             if (merchant != null) putExtra(Extras.MERCHANT, merchant)
         }
-
-        val wrong = PendingIntent.getBroadcast(
-            c, nid * 4 + 2,
-            Intent(c, NotificationActionReceiver::class.java).setAction(Extras.ACTION_WRONG)
-                .putExtra(Extras.NOTIF_ID, nid).putExtra(Extras.PKG, pkg).putExtra(Extras.PENDING, pid),
-            PI_FLAGS
+        fun bc(action: String, rc: Int, mutable: Boolean = false) = PendingIntent.getBroadcast(
+            c, nid * 8 + rc,
+            Intent(c, NotificationActionReceiver::class.java).setAction(action)
+                .putExtra(Extras.NOTIF_ID, nid).putExtra(Extras.PKG, pkg).putExtra(Extras.PENDING, pid).putExtra(Extras.ACCOUNT, accountId),
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
         )
+
+        // Type the amount right in the notification: no need to open the app.
+        val enter = NotificationCompat.Action.Builder(0, "Enter amount", bc(Extras.ACTION_AMOUNT, 3, mutable = true))
+            .addRemoteInput(RemoteInput.Builder("amount").setLabel("Amount, e.g. 250").build())
+            .setAllowGeneratedReplies(false).build()
 
         val title = if (amount != null)
             "Log ${inr(amount)}" + (if (!merchant.isNullOrBlank()) " at $merchant" else "") + "?"
-        else "Did you just make a transaction via $label?"
+        else "Did you just pay via $label?"
+        val lastTitle = last?.let { it.note.ifBlank { it.merchant }.ifBlank { it.category } }
 
-        val n = NotificationCompat.Builder(c, CH)
+        val b = NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle(title)
-            .setContentText(label)
+            .setContentText(if (last != null) "Last time: $lastTitle · ${inr(last.amount)}" else label)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setAutoCancel(true)
+            .setAutoCancel(true).setOnlyAlertOnce(true)
+            .setTimeoutAfter(30 * 60_000L)   // it stays in the app under "Unlogged payments"
             .setContentIntent(act("EXPENSE", 0))
-            .addAction(0, "Expense", act("EXPENSE", 0))
-            .addAction(0, "Income", act("INCOME", 1))
-            .addAction(0, "Wrong Call", wrong)
-            .build()
-        nm.notify(nid, n)
+        if (last != null) b.addAction(0, "Same again · ${inr(last.amount)}", bc(Extras.ACTION_SAME, 1))
+        else b.addAction(0, "Expense", act("EXPENSE", 0))
+        b.addAction(enter)
+        b.addAction(0, "Wrong call", bc(Extras.ACTION_WRONG, 2))
+        nm.notify(nid, b.build())
     }
 }
 

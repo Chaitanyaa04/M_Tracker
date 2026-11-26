@@ -15,6 +15,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountBalance
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.LocalFireDepartment
+import androidx.compose.material.icons.rounded.LocalLaundryService
+import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CardGiftcard
 import androidx.compose.material.icons.rounded.ChildCare
@@ -88,6 +94,7 @@ val HEAD_ICON_KEYS: List<Pair<String, ImageVector>> = listOf(
     "invest" to Icons.Rounded.TrendingUp, "bank" to Icons.Rounded.AccountBalance, "card" to Icons.Rounded.CreditCard,
     "savings" to Icons.Rounded.Savings, "income" to Icons.Rounded.Payments, "work" to Icons.Rounded.Work,
     "refund" to Icons.Rounded.Replay, "reward" to Icons.Rounded.Redeem, "swap" to Icons.Rounded.SwapHoriz,
+    "water" to Icons.Rounded.WaterDrop, "gas" to Icons.Rounded.LocalFireDepartment, "laundry" to Icons.Rounded.LocalLaundryService,
     "person" to Icons.Rounded.Person, "other" to Icons.Rounded.MoreHoriz, "tag" to Icons.Rounded.Label
 )
 val HEAD_ICON_MAP: Map<String, ImageVector> = HEAD_ICON_KEYS.toMap()
@@ -96,6 +103,15 @@ val HEAD_ICON_MAP: Map<String, ImageVector> = HEAD_ICON_KEYS.toMap()
 fun guessIconKey(name: String): String {
     val n = name.lowercase()
     return when {
+        "cylinder" in n -> "gas"
+        "water" in n -> "water"
+        "laundry" in n -> "laundry"
+        "vegetable" in n || "fruit" in n || "milk" in n || "dairy" in n -> "grocery"
+        n.startsWith("emi") || "loan" in n -> "bank"
+        "medicine" in n -> "meds"
+        "stipend" in n || "freelance" in n || "pocket" in n -> "income"
+        "dividend" in n || "cashback" in n -> "reward"
+        "household" in n -> "home"
         "coffee" in n || "cafe" in n || "snack" in n -> "cafe"
         "dining" in n || "food" in n || "restaurant" in n || "meal" in n -> "food"
         "grocer" in n -> "grocery"
@@ -182,21 +198,60 @@ fun HeadChoice(name: String, selected: Boolean, modifier: Modifier = Modifier, o
     }
 }
 
-/** One-tap row of your most likely heads, plus an "All heads" tile that opens the tray. */
+/** A small pinned control that never scrolls away: top half = add new, bottom half = see more (opens the tray). */
 @Composable
-fun HeadStrip(names: List<String>, selected: String, onPick: (String) -> Unit, onMore: () -> Unit) {
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        names.forEach { n -> HeadChoice(n, n == selected, Modifier.width(68.dp)) { onPick(n) } }
-        Column(
-            Modifier.width(68.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onMore).padding(vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                Modifier.padding(3.dp).size(52.dp).clip(RoundedCornerShape(17.dp)).border(1.dp, L.border, RoundedCornerShape(17.dp)),
-                contentAlignment = Alignment.Center
-            ) { Icon(Icons.Rounded.MoreHoriz, null, tint = L.text, modifier = Modifier.size(26.dp)) }
-            Spacer(Modifier.height(4.dp))
-            Text("All heads", color = L.muted, fontSize = 11.sp)
+fun PinnedPair(onNew: () -> Unit, onMore: () -> Unit, height: Dp = 48.dp) {
+    val shape = RoundedCornerShape(14.dp)
+    Column(Modifier.padding(start = 8.dp).width(46.dp).height(height).clip(shape).border(1.dp, L.border, shape)) {
+        Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onNew), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.Add, "New", tint = L.text, modifier = Modifier.size(18.dp))
+        }
+        Hairline()
+        Box(Modifier.weight(1f).fillMaxWidth().clickable(onClick = onMore), contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.MoreHoriz, "More", tint = L.text, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+/** Your four regular heads, then the pinned New / More control. Nothing is preselected. */
+@Composable
+fun HeadStrip(names: List<String>, selected: String, onPick: (String) -> Unit, onNew: () -> Unit, onMore: () -> Unit) {
+    Row(verticalAlignment = Alignment.Top) {
+        Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            names.take(4).forEach { n -> HeadChoice(n, n == selected, Modifier.width(66.dp)) { onPick(n) } }
+        }
+        Box(Modifier.padding(top = 12.dp)) { PinnedPair(onNew, onMore, 52.dp) }
+    }
+}
+
+/** Every merchant you've used, searchable; type a new name to add it. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MerchantsSheet(names: List<String>, selected: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    val shown = names.filter { q.isBlank() || it.contains(q.trim(), ignoreCase = true) }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+        containerColor = L.surface, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Cap("Merchants", color = L.text)
+            Field("Search or add new", q, { q = it })
+        }
+        LazyColumn(Modifier.heightIn(max = 480.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
+            if (q.isNotBlank() && names.none { it.equals(q.trim(), true) }) item(key = "__new") {
+                Text("+ Add “${q.trim()}”", color = L.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    modifier = Modifier.fillMaxWidth().clickable { onPick(q.trim()) }.padding(24.dp, 14.dp))
+            }
+            listItems(shown, key = { it }) { n ->
+                Column(Modifier.clickable { onPick(n) }) {
+                    Row(Modifier.fillMaxWidth().padding(24.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(n, color = L.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        if (n.equals(selected, true)) Text("✓", color = L.text, fontSize = 16.sp)
+                    }
+                    Hairline(Modifier.padding(start = 24.dp))
+                }
+            }
         }
     }
 }

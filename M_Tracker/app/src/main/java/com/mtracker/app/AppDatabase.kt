@@ -7,14 +7,19 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+/** Most common first: the quick row shows the first four until you have your own history. */
 val DEFAULT_EXPENSE_CATEGORIES = listOf(
-    "Food & Dining", "Coffee & Snacks", "Groceries", "Auto & Transport", "Gas & Fuel", "Travel",
-    "Bills & Utilities", "Phone & Internet", "Rent", "Shopping", "Clothing", "Entertainment",
-    "Online Subscriptions", "Personal Care", "Health & Insurance", "Fitness", "Education", "Books",
-    "Stationery", "Home & Repairs", "Gifts & Donations", "Family & Kids", "Pets", "Investments",
-    "Taxes & Fees", "Other"
+    "Food & Dining", "Groceries", "Auto & Transport", "Bills & Utilities",
+    "Coffee & Snacks", "Vegetables & Fruits", "Milk & Dairy", "Gas & Fuel", "Travel",
+    "Mobile Recharge", "Phone & Internet", "Electricity", "Water", "Gas Cylinder", "Rent", "EMI & Loans",
+    "Shopping", "Clothing", "Household", "Laundry", "Entertainment", "Online Subscriptions",
+    "Personal Care", "Health & Insurance", "Medicines", "Insurance Premium", "Fitness",
+    "Education", "Books", "Stationery", "Home & Repairs", "Gifts & Donations", "Family & Kids", "Pets",
+    "Investments", "Taxes & Fees", "Bank Charges", "Other"
 )
-val DEFAULT_INCOME_CATEGORIES = listOf("Salary", "Refunds", "Interest", "Gifts", "Other")
+val DEFAULT_INCOME_CATEGORIES = listOf(
+    "Salary", "Stipend", "Pocket Money", "Freelance", "Refunds", "Cashback", "Interest", "Dividends", "Rent Received", "Gifts", "Other"
+)
 
 private fun seedCategories(db: SupportSQLiteDatabase) {
     DEFAULT_EXPENSE_CATEGORIES.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'EXPENSE')", arrayOf<Any>(it)) }
@@ -34,6 +39,16 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
 }
 
 /** v3: account card colours, transaction creation time (for time-of-day suggestions), head icons. */
+/** v5: person details (relation, phone, note) and the larger set of well-known heads. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE persons ADD COLUMN relation TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE persons ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE persons ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        seedCategories(db)
+    }
+}
+
 /** v4: people & splits, trip routes, itemised bills. */
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
@@ -56,7 +71,7 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
 
 @Database(
     entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class, Category::class, DayMark::class, Person::class],
-    version = 4, exportSchema = false
+    version = 5, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): LedgerDao
@@ -66,7 +81,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(c: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(c.applicationContext, AppDatabase::class.java, "ledger.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT INTO accounts(name,type,openingBalance,color) VALUES('Cash','CASH',0.0,2)")

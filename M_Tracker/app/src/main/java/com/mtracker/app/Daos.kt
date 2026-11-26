@@ -88,4 +88,8 @@ interface LedgerDao {
 
     // de-duplication of payment prompts
     @Query("SELECT COUNT(*) FROM pending WHERE pkg = :pkg AND time > :since") suspend fun countRecent(pkg: String, since: Long): Int
+
+    @Update suspend fun updatePerson(p: Person)
+    @Query("SELECT * FROM transactions WHERE accountId = :id AND type = 'EXPENSE' ORDER BY createdAt DESC, id DESC LIMIT 1")
+    suspend fun lastExpenseFor(id: Long): Txn?
 }

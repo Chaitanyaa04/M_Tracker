@@ -185,6 +185,9 @@ fun AddEditTransactionSheet(
     var error by remember { mutableStateOf("") }
     var showDate by remember { mutableStateOf(false) }
     var showHeads by remember { mutableStateOf(false) }
+    var newHead by remember { mutableStateOf(false) }
+    var showMerchants by remember { mutableStateOf(false) }
+    var newMerchant by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(!isNew) }
     var catTouched by remember { mutableStateOf(!isNew) }
     var accTouched by remember { mutableStateOf(!isNew || d.pendingId != 0L) }
@@ -199,11 +202,17 @@ fun AddEditTransactionSheet(
 
     val kind = if (type == "INCOME") "INCOME" else "EXPENSE"
     val headNames = heads.filter { it.kind == kind }.map { it.name }
+    val order = if (kind == "INCOME") DEFAULT_INCOME_CATEGORIES else DEFAULT_EXPENSE_CATEGORIES
     val baseQuick = remember(kind, heads, usage) {
         val l = likely(kind).filter { it in headNames }
-        (l + headNames.sortedByDescending { usage["$kind|$it"] ?: 0 }).distinct().take(7)
+        val byUse = headNames.sortedWith(
+            compareByDescending<String> { usage["$kind|$it"] ?: 0 }.thenBy { order.indexOf(it).let { i -> if (i < 0) 999 else i } }
+        )
+        (l + byUse).distinct()
     }
-    val quick = if (category in headNames && category !in baseQuick) listOf(category) + baseQuick.take(6) else baseQuick
+    val quick = ((if (category in headNames) listOf(category) else emptyList()) + baseQuick).distinct().take(4)
+    val topMerchants = remember(merchantNames) { merchantNames.take(12) }
+    val merchantRow = ((if (merchant.isNotBlank()) listOf(merchant.trim()) else emptyList()) + topMerchants).distinct().take(4)
     val accOptions = accounts.map { it.name to it.id }
     val accName = { id: Long -> accounts.firstOrNull { it.id == id }?.name ?: "Select" }
     val iconKey = (LocalHeadIcons.current[category])?.takeIf { it in HEAD_ICON_MAP } ?: guessIconKey(category)
@@ -219,12 +228,12 @@ fun AddEditTransactionSheet(
     val signText = when (type) { "EXPENSE" -> "−"; "INCOME" -> "+"; else -> "" }
 
     fun fill(t: Txn) {
-        merchant = t.merchant; amount = fmtAmt(t.amount); category = t.category
+        merchant = t.merchant; note = t.note; amount = fmtAmt(t.amount); category = t.category
         accId = t.accountId; tag = t.tag; catTouched = true; accTouched = true
     }
     fun onMerchant(s: String) {
         merchant = s
-        if (isNew) lookup(s)?.let {
+        if (isNew && s.isNotBlank()) lookup(s)?.let {
             if (it.type == type) {
                 if (!catTouched) category = it.category
                 if (!accTouched) accId = it.accountId
@@ -248,7 +257,7 @@ fun AddEditTransactionSheet(
             // ---- what kind of entry: plain words, no + / − guessing
             val shape = RoundedCornerShape(16.dp)
             Row(Modifier.fillMaxWidth().clip(shape).background(L.bg).border(1.dp, L.border, shape).padding(4.dp)) {
-                listOf("EXPENSE" to "Money out", "INCOME" to "Money in", "TRANSFER" to "Move").forEach { (k, label) ->
+                listOf("EXPENSE" to "Expense", "INCOME" to "Income", "TRANSFER" to "Transfer").forEach { (k, label) ->
                     val sel = type == k
                     Box(
                         Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (sel) L.accent else Color.Transparent)
@@ -256,13 +265,13 @@ fun AddEditTransactionSheet(
                                 type = k
                                 val nk = if (k == "INCOME") "INCOME" else "EXPENSE"
                                 val names = heads.filter { it.kind == nk }.map { it.name }
-                                if (category !in names) category = if ("Other" in names) "Other" else names.firstOrNull() ?: "Other"
+                                if (category !in names) category = ""
                             }.padding(vertical = 11.dp),
                         contentAlignment = Alignment.Center
                     ) { Text(label, color = if (sel) L.onAccent else L.text, fontSize = 14.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal) }
                 }
             }
-            if (type == "TRANSFER") Text("Move money between your own accounts (like paying a card bill). It isn’t counted as spending.", color = L.muted, fontSize = 12.sp)
+            if (type == "TRANSFER") Text("Between your own accounts. Not counted as spending.", color = L.muted, fontSize = 12.sp)
 
             // ---- amount: the normal number pad
             Column {
@@ -294,22 +303,27 @@ fun AddEditTransactionSheet(
                 Hairline()
             }
 
+            Field("Title", note, { note = it })
+
             if (itemized) Receipt(items, adjs, subtotal, itemTotal)
 
             val chips = if (isNew) recents.filter { it.type == type }.take(6) else emptyList()
             if (chips.isNotEmpty() && amount.isEmpty() && !itemized) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Cap("Repeat a recent one")
+                    Cap("Recent")
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        chips.forEach { t -> Chip(t.merchant + " · " + fmtAmt(t.amount), false) { fill(t) } }
+                        chips.forEach { t -> Chip(t.note.ifBlank { t.merchant } + " · " + fmtAmt(t.amount), false) { fill(t) } }
                     }
                 }
             }
 
             if (type != "TRANSFER") {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Cap("Head"); Cap(category, color = L.text) }
-                    HeadStrip(quick, category, onPick = { category = it; catTouched = true }, onMore = { showHeads = true })
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Cap("Head")
+                        Cap(category.ifBlank { "Required" }, color = if (category.isBlank()) L.red else L.text)
+                    }
+                    HeadStrip(quick, category, onPick = { category = it; catTouched = true }, onNew = { newHead = true }, onMore = { showHeads = true })
                 }
             }
 
@@ -345,15 +359,27 @@ fun AddEditTransactionSheet(
                 }
             }
 
-            Column {
-                Field("Merchant", merchant, ::onMerchant)
-                val matches = if (isNew && merchant.isNotBlank())
-                    merchantNames.filter { it.contains(merchant.trim(), true) && !it.equals(merchant.trim(), true) }.take(4) else emptyList()
-                if (matches.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        matches.forEach { m -> Chip(m, false) { onMerchant(m) } }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Cap("Merchant")
+                    Cap(merchant.ifBlank { "Optional" }, color = if (merchant.isBlank()) L.muted else L.text)
+                }
+                if (newMerchant) {
+                    Field("New merchant", merchant, ::onMerchant)
+                    val matches = if (isNew && merchant.isNotBlank())
+                        merchantNames.filter { it.contains(merchant.trim(), true) && !it.equals(merchant.trim(), true) }.take(4) else emptyList()
+                    if (matches.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        matches.forEach { m -> Chip(m, false) { onMerchant(m); newMerchant = false } }
                     }
+                } else Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (merchantRow.isEmpty()) Text("No merchants yet", color = L.muted, fontSize = 13.sp)
+                        merchantRow.forEach { m ->
+                            val on = m.equals(merchant.trim(), true)
+                            Chip(m, on) { if (on) onMerchant("") else onMerchant(m) }
+                        }
+                    }
+                    PinnedPair({ newMerchant = true }, { showMerchants = true }, 44.dp)
                 }
             }
 
@@ -368,21 +394,21 @@ fun AddEditTransactionSheet(
                     }
                     if (personId != 0L) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Chip("Just note it", split == "TAG") { split = "TAG" }
-                            Chip("Split with $personName", split == "SPLIT") { split = "SPLIT" }
-                            Chip("I paid for $personName", split == "FULL") { split = "FULL" }
+                            Chip("Just note", split == "TAG") { split = "TAG" }
+                            Chip("Split", split == "SPLIT") { split = "SPLIT" }
+                            Chip("I covered all", split == "FULL") { split = "FULL" }
                         }
                         val tv = totalValue ?: 0.0
                         Text(
                             when (split) {
-                                "SPLIT" -> "You pay ${inr(tv - shareValue)}. ${inr(shareValue)} is added to what $personName owes you."
-                                "FULL" -> "$personName owes you the full ${inr(tv)}."
-                                else -> "Only noted for reference. Nothing is added to what $personName owes."
+                                "SPLIT" -> "$personName owes you ${inr(shareValue)}"
+                                "FULL" -> "$personName owes you ${inr(tv)}"
+                                else -> "Noted only. Nothing owed."
                             },
                             color = L.muted, fontSize = 12.sp, lineHeight = 17.sp
                         )
                         if (split == "SPLIT") Field(
-                            "$personName’s share (INR)", if (shareTouched) share else fmtAmt(half),
+                            "$personName’s share", if (shareTouched) share else fmtAmt(half),
                             { share = cleanAmount(it); shareTouched = true }, kb = KeyboardType.Decimal
                         )
                     }
@@ -406,7 +432,6 @@ fun AddEditTransactionSheet(
                         )
                         Hairline()
                     }
-                    Field("Note", note, { note = it })
                     if (type != "TRANSFER") Field("Tag (e.g. personal)", tag, { tag = it.replace("#", "") })
                     if (type == "EXPENSE") SwitchRow("Leave out of monthly budget", exclude) { exclude = it }
                     if (isNew) Picker(
@@ -424,6 +449,7 @@ fun AddEditTransactionSheet(
                 val v = totalValue
                 when {
                     v == null || v <= 0 -> error = "Enter an amount first"
+                    type != "TRANSFER" && category.isBlank() -> error = "Choose a head"
                     accId == 0L -> error = "Pick an account"
                     type == "TRANSFER" && (toId == 0L || toId == accId) -> error = "Pick two different accounts"
                     else -> {
@@ -466,6 +492,9 @@ fun AddEditTransactionSheet(
         onCreate = { n, k, ic -> onAddHead(n, k, ic); category = n; catTouched = true; showHeads = false },
         onDismiss = { showHeads = false }
     )
+
+    if (newHead) NewHeadDialog(kind, { n, k, ic -> onAddHead(n, k, ic); category = n; catTouched = true; newHead = false }, { newHead = false })
+    if (showMerchants) MerchantsSheet(merchantNames, merchant, { onMerchant(it); newMerchant = false; showMerchants = false }, { showMerchants = false })
 
     if (showDate) {
         val st = rememberDatePickerState(

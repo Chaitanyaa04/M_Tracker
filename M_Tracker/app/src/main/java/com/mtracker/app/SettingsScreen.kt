@@ -1,6 +1,5 @@
 package com.mtracker.app
 
-import androidx.compose.ui.text.font.FontWeight
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.Close
@@ -148,7 +148,7 @@ private fun SettingsHome(go: (String) -> Unit) {
             Panel(Modifier.padding(horizontal = 16.dp)) {
                 NavRow("App updates", if (hasUpdate) "$latest is available" else "Version ${BuildConfig.VERSION_NAME}", Icons.Rounded.SystemUpdate, false) { go("updates") }
                 NavRow("Install & permission help", "Play Protect, usage access", Icons.Rounded.Help, false) { go("help") }
-                NavRow("About M_Tracker", "Privacy promise", Icons.Rounded.Info, true) { go("about") }
+                NavRow("About Arthak", "Privacy promise", Icons.Rounded.Info, true) { go("about") }
             }
         }
     }
@@ -208,6 +208,7 @@ private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> U
     val p = vm.prefs
     val mode by p.mode.collectAsState()
     val live by p.liveDetect.collectAsState()
+    val cd by p.cooldownSec.collectAsState()
     val delay by p.delaySec.collectAsState()
     val sel by p.apps.collectAsState()
     val accs by vm.accounts.collectAsState()
@@ -256,7 +257,11 @@ private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> U
                     if (listenerOk) Cap("Notification access granted", color = L.green)
                     else MonoButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
                 }
-                Text("If an app fires again within 5 minutes you won’t be asked twice. Each “wrong call” makes that app a little less eager next time.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Cap("Quiet period after a prompt")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120, "5m" to 300, "10m" to 600).forEach { (l, s2) -> Chip(l, cd == s2) { p.setCooldown(s2) } }
+                }
+                Text("After one prompt for an app, it stays quiet for this long even if it triggers again. Every “wrong call” also makes that app a bit less eager.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
         item { Cap("Apps I pay with", Modifier.padding(24.dp, 4.dp, 24.dp, 8.dp)) }
@@ -346,7 +351,7 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Spacer(Modifier.height(8.dp))
                 Cap("Shortcuts")
-                Text("Long-press the M_Tracker icon on your home screen for “Add expense” and “Add income”. Drag one out to keep it on your home screen. Nothing sits in your notification shade.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("Long-press the Arthak icon on your home screen for “Add expense” and “Add income”. Drag one out to keep it on your home screen. Nothing sits in your notification shade.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }
@@ -430,7 +435,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> U
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cap("Backup (everything)")
-                Text("This app has no cloud, so a backup is your safety net if you lose or reset your phone. Pick a folder (for example one synced by Drive or Syncthing) and M_Tracker saves a full backup there.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("This app has no cloud, so a backup is your safety net if you lose or reset your phone. Pick a folder (for example one synced by Drive or Syncthing) and Arthak saves a full backup there.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Text(if (folder.isBlank()) "Folder: not set" else "Folder: set · last backup $lastText", color = L.text, fontSize = 13.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MonoButton(if (folder.isBlank()) "Choose folder" else "Change folder", { tree.launch(null) }, filled = false)
@@ -443,7 +448,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> U
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cap("Spreadsheet (CSV)")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MonoButton("Export CSV", { export.launch("m_tracker-${LocalDate.now()}.csv") })
+                    MonoButton("Export CSV", { export.launch("arthak-${LocalDate.now()}.csv") })
                     MonoButton("Import CSV", { importer.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream")) }, filled = false)
                 }
                 Text("Files go through Android’s file picker. No storage permission, no network.", color = L.muted, fontSize = 12.sp)
@@ -454,7 +459,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> U
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,
             title = { Cap("Restore backup?", color = L.text) },
-            text = { Text("This replaces everything currently in M_Tracker with the contents of the backup.", color = L.muted, fontSize = 14.sp) },
+            text = { Text("This replaces everything currently in Arthak with the contents of the backup.", color = L.muted, fontSize = 14.sp) },
             confirmButton = { TextButton({ vm.restoreBackup(u, onMsg); restoreUri = null }) { Text("Restore", color = L.red) } },
             dismissButton = { TextButton({ restoreUri = null }) { Text("Cancel") } }
         )
@@ -480,7 +485,7 @@ private fun HelpPage(onBack: () -> Unit) {
                 Step(1, "Tap “Open App info” below.")
                 Step(2, "Tap the ⋮ menu at the top-right.")
                 Step(3, "Choose “Allow restricted settings” and confirm with your PIN or fingerprint.")
-                Step(4, "Come back and tap “Open usage access”, then switch M_Tracker on.")
+                Step(4, "Come back and tap “Open usage access”, then switch Arthak on.")
                 Text("If ⋮ doesn’t show the option, tap the usage-access toggle once (it shows the block message), then check App info again.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MonoButton("Open App info", { openAppInfo(ctx) })
@@ -504,7 +509,7 @@ private fun AboutPage(onBack: () -> Unit) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("₹", fontSize = 56.sp, color = L.text, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
-                Text("M_Tracker", color = L.text, fontSize = 22.sp)
+                Text("Arthak", color = L.text, fontSize = 22.sp)
                 Num("Version ${BuildConfig.VERSION_NAME}" + if (BuildConfig.AUTOFILL) " · auto-fill build" else "", size = 13.sp, color = L.muted)
                 Spacer(Modifier.height(8.dp))
                 Text("A private expense tracker. Your data lives only in a local database on this device. No analytics, no ads, no account. The internet is used only to fetch app updates.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)

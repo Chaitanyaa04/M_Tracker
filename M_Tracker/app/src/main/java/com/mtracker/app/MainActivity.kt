@@ -89,7 +89,7 @@ class MainActivity : FragmentActivity() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vm.locked.value = false }
         })
         prompt.authenticate(
-            BiometricPrompt.PromptInfo.Builder().setTitle("Unlock M_Tracker").setAllowedAuthenticators(auth).build()
+            BiometricPrompt.PromptInfo.Builder().setTitle("Unlock Arthak").setAllowedAuthenticators(auth).build()
         )
     }
 

@@ -77,6 +77,7 @@ class Repository(private val db: AppDatabase) {
     suspend fun addPerson(name: String): Long = d.insertPerson(Person(name = name.trim()))
     suspend fun deletePerson(id: Long) = db.withTransaction { d.detachPerson(id); d.deletePerson(id) }
     suspend fun addTxn(t: Txn) { save(t) }
+    suspend fun savePerson(p: Person): Long = if (p.id == 0L) d.insertPerson(p) else { d.updatePerson(p); p.id }
 
     // ---------- CSV (Storage Access Framework URIs; no storage permission) ----------
     private val header = "date,type,amount,merchant,note,category,account,to_account,tag,exclude_from_budget"

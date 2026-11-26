@@ -19,6 +19,8 @@ object Extras {
     const val PKG = "x_pkg"
     const val PENDING = "x_pending"
     const val OPEN = "x_open"
+    const val ACTION_SAME = "com.mtracker.app.SAME_AGAIN"
+    const val ACTION_AMOUNT = "com.mtracker.app.ENTER_AMOUNT"
     const val ACTION_NO_SPEND = "com.mtracker.app.NO_SPEND"
     const val ACTION_WRONG = "com.mtracker.app.WRONG_CALL"
 }
@@ -40,6 +42,7 @@ class AppPrefs private constructor(c: Context) {
     val autoBackup = MutableStateFlow(sp.getBoolean("autobackup", false))
     val backupUri = MutableStateFlow(sp.getString("backupuri", "") ?: "")
     val lastBackup = MutableStateFlow(sp.getLong("lastbackup", 0L))
+    val cooldownSec = MutableStateFlow(sp.getInt("cooldown", 120))            // quiet period after a prompt: 10 s to 10 min
     val liveDetect = MutableStateFlow(sp.getBoolean("live", false))          // instant detection needs a status notification
     val lastScan = MutableStateFlow(sp.getLong("lastscan", 0L))
     val updateCheck = MutableStateFlow(sp.getBoolean("updcheck", true))
@@ -65,6 +68,10 @@ class AppPrefs private constructor(c: Context) {
     fun setAutoBackup(v: Boolean) { autoBackup.value = v; sp.edit().putBoolean("autobackup", v).apply() }
     fun setBackupUri(v: String) { backupUri.value = v; sp.edit().putString("backupuri", v).apply() }
     fun setLastBackup(v: Long) { lastBackup.value = v; sp.edit().putLong("lastbackup", v).apply() }
+    fun setCooldown(v: Int) { cooldownSec.value = v; sp.edit().putInt("cooldown", v).apply() }
+    fun cooldownMs(): Long = cooldownSec.value * 1000L
+    fun lastPrompt(pkg: String): Long = sp.getLong("lp_$pkg", 0L)
+    fun setPrompt(pkg: String, t: Long) { sp.edit().putLong("lp_$pkg", t).apply() }
     fun setLive(v: Boolean) { liveDetect.value = v; sp.edit().putBoolean("live", v).apply() }
     fun setLastScan(v: Long) { lastScan.value = v; sp.edit().putLong("lastscan", v).apply() }
     fun setUpdateCheck(v: Boolean) { updateCheck.value = v; sp.edit().putBoolean("updcheck", v).apply() }

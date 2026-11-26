@@ -81,7 +81,13 @@ data class DayMark(@PrimaryKey val date: Long)
 
 /** Someone you split with, lend to, or buy things for. */
 @Entity(tableName = "persons")
-data class Person(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String)
+data class Person(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val relation: String = "",
+    val phone: String = "",
+    val note: String = ""
+)
 
 /** What you actually spent: your share only. Split / paid-for-them amounts that others owe you are excluded. */
 val Txn.myAmount: Double get() = if (type == "EXPENSE") amount - owed else amount

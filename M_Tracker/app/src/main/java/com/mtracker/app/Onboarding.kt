@@ -72,7 +72,7 @@ fun LockScreen(onUnlock: () -> Unit) {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Text("₹", fontSize = 72.sp, fontWeight = FontWeight.Light, color = L.text)
-            Cap("M_Tracker is locked")
+            Cap("Arthak is locked")
             MonoButton("Unlock", onUnlock)
         }
     }
@@ -133,7 +133,7 @@ fun Onboarding(vm: MainViewModel, onDone: () -> Unit) {
                         2 -> {
                             Cap("Step 3 · Payment reminders", color = L.text)
                             Text("Get asked right after you pay.", color = L.text, fontSize = 24.sp, fontWeight = FontWeight.Light)
-                            Text("M_Tracker notices only which payment app you opened (never what’s on screen), waits a few seconds, then asks “Did you just pay?”. Optional, you can skip it.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)
+                            Text("Arthak notices only which payment app you opened (never what’s on screen), waits a few seconds, then asks “Did you just pay?”. Optional, you can skip it.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)
                             if (usageOk) Cap("Usage access granted", color = L.green)
                             else {
                                 MonoButton("Grant usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
