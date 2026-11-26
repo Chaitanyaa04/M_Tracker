@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">M_Tracker</string>
+    <string name="app_name">Arthak</string>
     <string name="sc_expense">Add expense</string>
     <string name="sc_income">Add income</string>
 </resources>
