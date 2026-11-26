@@ -1,4 +1,4 @@
-# M_Tracker
+# Arthak
 
 A private expense tracker (Kotlin, Jetpack Compose, Room). Your data stays on the phone. The only network use
 is checking/downloading app updates from this repository's GitHub Releases.
@@ -13,7 +13,7 @@ is checking/downloading app updates from this repository's GitHub Releases.
 4. On the phone: a banner appears in the app ("Update available"). Tap **Update**, confirm once in Android's installer.
 
 First install: download the APK from the Release (or the workflow artifact) and install it from your file manager.
-Allow "Install unknown apps" for M_Tracker the first time you update from inside the app.
+Allow "Install unknown apps" for Arthak the first time you update from inside the app.
 
 ## Flavors
 `standard` is the recommended build (no notification-reading code). `autofill` adds optional notification auto-fill.
