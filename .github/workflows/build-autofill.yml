@@ -13,14 +13,14 @@ jobs:
       # Actions are pinned to immutable commit SHAs (supply-chain hardening):
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
 
-      - uses: actions/setup-java@c5195efecf7bdfc982ee8bae7a71cb8b1152acb0 # v4.7.1
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with: { distribution: temurin, java-version: 17 }
 
-      - uses: android-actions/setup-android@9fc6c4e9069584725b706bfe858ff7305775f4b9 # v3.2.2
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
         with:
           packages: platform-tools
 
-      - uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d536afe37e762614aec71 # v4.6.0
+      - uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d5ffbc76a5518407e1af0 # v4.2.1
         with: { gradle-version: "8.9" }
 
       - name: Decode signing key
@@ -49,7 +49,7 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/release.jks"
 
-      - uses: actions/upload-artifact@0b7f96235137c4898467d4b0a68b7bb3dc9aa700 # v4.6.0
+      - uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: Arthak-autofill-apk
           path: app/build/outputs/apk/autofill/*/*.apk
