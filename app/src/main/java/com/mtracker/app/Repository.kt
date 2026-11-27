@@ -82,6 +82,14 @@ class Repository(private val db: AppDatabase) {
     // ---------- CSV (Storage Access Framework URIs; no storage permission) ----------
     private val header = "date,type,amount,merchant,note,category,account,to_account,tag,exclude_from_budget"
     private val zone get() = ZoneId.systemDefault()
+    private val formulaTriggers = setOf('=', '+', '-', '@', '\t', '\r')
+
+    private fun safeTextCell(s: String): String {
+        val trimmedStart = s.trimStart()
+        val needsGuard = s.isNotEmpty() && (s[0] in formulaTriggers || (trimmedStart.isNotEmpty() && trimmedStart[0] in formulaTriggers))
+        val guarded = if (needsGuard) "'$s" else s
+        return q(guarded)
+    }
 
     private fun q(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
 
@@ -91,47 +99,56 @@ class Repository(private val db: AppDatabase) {
         cr.openOutputStream(uri, "wt")!!.bufferedWriter().use { w ->
             w.write(header + "\n")
             for (t in list) {
-                val cols = listOf(
-                    java.time.Instant.ofEpochMilli(t.date).atZone(zone).toLocalDate().toString(),
-                    t.type, t.amount.toString(), t.merchant, t.note, t.category,
-                    accs[t.accountId]?.name ?: "",
-                    t.toAccountId?.let { accs[it]?.name } ?: "",
-                    t.tag, t.excludeFromBudget.toString()
-                )
-                w.write(cols.joinToString(",") { q(it) } + "\n")
+                val dateStr = java.time.Instant.ofEpochMilli(t.date).atZone(zone).toLocalDate().toString()
+                val amountStr = if (t.amount.isFinite()) t.amount.toString() else "0.0"
+                val line = listOf(
+                    q(dateStr),
+                    q(t.type),
+                    q(amountStr),
+                    safeTextCell(t.merchant),
+                    safeTextCell(t.note),
+                    safeTextCell(t.category),
+                    safeTextCell(accs[t.accountId]?.name ?: ""),
+                    safeTextCell(t.toAccountId?.let { accs[it]?.name } ?: ""),
+                    safeTextCell(t.tag),
+                    q(t.excludeFromBudget.toString())
+                ).joinToString(",")
+                w.write(line + "\n")
             }
         }
         list.size
     }
 
     suspend fun importCsv(cr: ContentResolver, uri: Uri): Int = withContext(Dispatchers.IO) {
-        val text = cr.openInputStream(uri)!!.bufferedReader().use { it.readText() }.removePrefix("\uFEFF")
-        val rows = parseCsv(text).drop(1).filter { it.size >= 10 }
+        val text = cr.openInputStream(uri)!!.use { readTextBounded(it) }.removePrefix("\uFEFF")
+        val rows = parseCsv(text).drop(1).filter { it.size >= 10 }.take(50_000)
         val accs = d.allAccounts().associateBy { it.name.lowercase() }.toMutableMap()
         var n = 0
         db.withTransaction {
             suspend fun accId(name: String): Long {
-                val key = name.trim().lowercase()
+                val clean = name.trim().take(100)
+                val key = clean.lowercase()
                 accs[key]?.let { return it.id }
-                val id = d.insertAccount(Account(name = name.trim(), type = "BANK"))
-                accs[key] = Account(id, name.trim(), "BANK")
+                val id = d.insertAccount(Account(name = clean, type = "BANK"))
+                accs[key] = Account(id, clean, "BANK")
                 return id
             }
             for (r in rows) {
-                val amt = r[2].toDoubleOrNull() ?: continue
+                val amt = r[2].trim().toDoubleOrNull()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
                 val date = try { LocalDate.parse(r[0].trim()).atStartOfDay(zone).toInstant().toEpochMilli() } catch (e: Exception) { continue }
                 val type = r[1].trim().uppercase()
                 if (type !in listOf("EXPENSE", "INCOME", "TRANSFER") || r[6].isBlank()) continue
                 d.insert(
                     Txn(
-                        type = type, amount = amt, merchant = r[3], note = r[4],
-                        category = r[5].ifBlank { "Other" }, date = date,
+                        type = type, amount = amt,
+                        merchant = r[3].take(120), note = r[4].take(500),
+                        category = r[5].ifBlank { "Other" }.take(80), date = date,
                         accountId = accId(r[6]),
                         toAccountId = if (r[7].isNotBlank()) accId(r[7]) else null,
-                        tag = r[8], excludeFromBudget = r[9].trim().equals("true", true)
+                        tag = r[8].take(60), excludeFromBudget = r[9].trim().equals("true", true)
                     )
                 )
-                if (type != "TRANSFER") d.insertCategory(Category(r[5].ifBlank { "Other" }, if (type == "INCOME") "INCOME" else "EXPENSE"))
+                if (type != "TRANSFER") d.insertCategory(Category(r[5].ifBlank { "Other" }.take(80), if (type == "INCOME") "INCOME" else "EXPENSE"))
                 n++
             }
         }

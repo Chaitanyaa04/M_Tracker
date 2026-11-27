@@ -19,6 +19,7 @@ private const val PI_FLAGS = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.
 fun activityPi(c: Context, rc: Int, type: String?, extra: Intent.() -> Unit = {}): PendingIntent {
     val i = Intent(c, MainActivity::class.java).apply {
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra(Extras.TOKEN, AppPrefs.get(c).intentToken)
         if (type != null) putExtra(Extras.TYPE, type)
         extra()
     }
@@ -34,10 +35,22 @@ object ReminderNotifier {
 
     fun ensureChannels(c: Context) {
         val nm = c.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CH, "Payment reminders", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(
+            NotificationChannel(CH, "Payment reminders", NotificationManager.IMPORTANCE_HIGH).apply {
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            }
+        )
         nm.createNotificationChannel(NotificationChannel(CH_MONITOR, "Instant detection status", NotificationManager.IMPORTANCE_MIN))
-        nm.createNotificationChannel(NotificationChannel(CH_CHECKIN, "Daily check-in", NotificationManager.IMPORTANCE_DEFAULT))
-        nm.createNotificationChannel(NotificationChannel(CH_UPDATE, "Updates & confirmations", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(
+            NotificationChannel(CH_CHECKIN, "Daily check-in", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            }
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_UPDATE, "Updates & confirmations", NotificationManager.IMPORTANCE_LOW).apply {
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            }
+        )
     }
 
     /**
@@ -63,10 +76,17 @@ object ReminderNotifier {
         ensureChannels(c)
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
+        val pub = NotificationCompat.Builder(c, CH)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Arthak")
+            .setContentText("Payment reminder available")
+            .build()
         nm.notify(4, NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle(if (count == 1) "1 payment visit to log" else "$count payment visits to log")
             .setContentText("Tap to review. Dismiss any that were a mistake.")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(pub)
             .setAutoCancel(true).setContentIntent(activityPi(c, 8001, null)).build())
     }
 
@@ -89,10 +109,17 @@ object ReminderNotifier {
         ensureChannels(c)
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
+        val pub = NotificationCompat.Builder(c, CH_UPDATE)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Arthak")
+            .setContentText("Transaction logged")
+            .build()
         nm.notify(6, NotificationCompat.Builder(c, CH_UPDATE)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle("Logged")
             .setContentText(text)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(pub)
             .setAutoCancel(true).setTimeoutAfter(6_000)
             .setContentIntent(activityPi(c, 8003, null)).build())
     }
@@ -103,6 +130,7 @@ object ReminderNotifier {
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
         val nid = pid.toInt()
+        val appLocked = AppPrefs.get(c).lockEnabled.value
 
         fun act(type: String, rc: Int) = activityPi(c, nid * 8 + rc, type) {
             putExtra(Extras.ACCOUNT, accountId)
@@ -118,29 +146,50 @@ object ReminderNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
         )
 
-        // Type the amount right in the notification: no need to open the app.
-        val enter = NotificationCompat.Action.Builder(0, "Enter amount", bc(Extras.ACTION_AMOUNT, 3, mutable = true))
-            .addRemoteInput(RemoteInput.Builder("amount").setLabel("Amount, e.g. 250").build())
-            .setAllowGeneratedReplies(false).build()
+        val pub = NotificationCompat.Builder(c, CH)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Arthak")
+            .setContentText("Payment reminder — unlock to view")
+            .build()
 
-        val title = if (amount != null)
+        val title = if (appLocked) {
+            "Did you just pay via $label?"
+        } else if (amount != null) {
             "Log ${inr(amount)}" + (if (!merchant.isNullOrBlank()) " at $merchant" else "") + "?"
-        else "Did you just pay via $label?"
+        } else {
+            "Did you just pay via $label?"
+        }
         val lastTitle = last?.let { it.note.ifBlank { it.merchant }.ifBlank { it.category } }
+        val bodyText = if (appLocked) {
+            "Open Arthak and unlock to log this payment."
+        } else if (last != null) {
+            "Last time: $lastTitle · ${inr(last.amount)}"
+        } else {
+            label
+        }
 
         val b = NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle(title)
-            .setContentText(if (last != null) "Last time: $lastTitle · ${inr(last.amount)}" else label)
+            .setContentText(bodyText)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(pub)
             .setAutoCancel(true).setOnlyAlertOnce(true)
             .setTimeoutAfter(30 * 60_000L)   // it stays in the app under "Unlogged payments"
             .setContentIntent(act("EXPENSE", 0))
-        if (last != null) b.addAction(0, "Same again · ${inr(last.amount)}", bc(Extras.ACTION_SAME, 1))
-        else b.addAction(0, "Expense", act("EXPENSE", 0))
-        b.addAction(enter)
-        b.addAction(0, "Wrong call", bc(Extras.ACTION_WRONG, 2))
+
+        // Only expose direct background write actions when App Lock is disabled.
+        if (!appLocked) {
+            val enter = NotificationCompat.Action.Builder(0, "Enter amount", bc(Extras.ACTION_AMOUNT, 3, mutable = true))
+                .addRemoteInput(RemoteInput.Builder("amount").setLabel("Amount, e.g. 250").build())
+                .setAllowGeneratedReplies(false).build()
+            if (last != null) b.addAction(0, "Same again · ${inr(last.amount)}", bc(Extras.ACTION_SAME, 1))
+            else b.addAction(0, "Expense", act("EXPENSE", 0))
+            b.addAction(enter)
+            b.addAction(0, "Wrong call", bc(Extras.ACTION_WRONG, 2))
+        }
         nm.notify(nid, b.build())
     }
 }
@@ -154,15 +203,23 @@ object CheckinNotifier {
         ReminderNotifier.ensureChannels(c)
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
+        val appLocked = AppPrefs.get(c).lockEnabled.value
         val title = if (pending > 0) "$pending payment(s) not logged yet" else "Nothing logged today"
+        val pub = NotificationCompat.Builder(c, ReminderNotifier.CH_CHECKIN)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Arthak")
+            .setContentText("Daily check-in")
+            .build()
         val b = NotificationCompat.Builder(c, ReminderNotifier.CH_CHECKIN)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle(title)
             .setContentText("Takes 5 seconds. Add it before you forget.")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(pub)
             .setAutoCancel(true)
             .setContentIntent(activityPi(c, 7001, if (pending > 0) null else "EXPENSE") { putExtra(Extras.NOTIF_ID, ID) })
             .addAction(0, "Add expense", activityPi(c, 7002, "EXPENSE") { putExtra(Extras.NOTIF_ID, ID) })
-        if (pending == 0) b.addAction(
+        if (pending == 0 && !appLocked) b.addAction(
             0, "No spending today",
             PendingIntent.getBroadcast(
                 c, 7003,

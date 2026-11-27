@@ -28,6 +28,8 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -176,7 +178,7 @@ fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 fun Field(
     label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier,
-    kb: KeyboardType = KeyboardType.Text, size: TextUnit = 16.sp
+    kb: KeyboardType = KeyboardType.Text, size: TextUnit = 16.sp, secret: Boolean = false
 ) {
     Column(modifier) {
         Cap(label)
@@ -184,7 +186,8 @@ fun Field(
             value, onChange, singleLine = true,
             textStyle = TextStyle(color = L.text, fontSize = size, fontFeatureSettings = "tnum"),
             cursorBrush = SolidColor(L.text),
-            keyboardOptions = KeyboardOptions(keyboardType = kb),
+            keyboardOptions = KeyboardOptions(keyboardType = if (secret) KeyboardType.Password else kb),
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 8.dp)
         )
         Hairline()

@@ -62,7 +62,13 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun SettingsScreen(vm: MainViewModel, onMsg: (String) -> Unit, modifier: Modifier = Modifier, startPage: String = "home") {
+fun SettingsScreen(
+    vm: MainViewModel,
+    onMsg: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    startPage: String = "home",
+    onConfirm: (String, () -> Unit) -> Unit = { _, go -> go() }
+) {
     var page by rememberSaveable(startPage) { mutableStateOf(startPage) }
     BackHandler(page != "home") { page = "home" }
     val back = { page = "home" }
@@ -70,13 +76,13 @@ fun SettingsScreen(vm: MainViewModel, onMsg: (String) -> Unit, modifier: Modifie
         when (page) {
             "home" -> SettingsHome { page = it }
             "appearance" -> AppearancePage(vm, back)
-            "security" -> SecurityPage(vm, onMsg, back)
+            "security" -> SecurityPage(vm, onMsg, onConfirm, back)
             "reminders" -> RemindersPage(vm, back) { page = "help" }
             "habits" -> HabitsPage(vm, back)
             "categories" -> CategoriesPage(vm, back)
             "recurring" -> RecurringPage(vm, back)
-            "data" -> DataPage(vm, onMsg, back)
-            "updates" -> UpdatesPage(vm, back)
+            "data" -> DataPage(vm, onMsg, onConfirm, back)
+            "updates" -> UpdatesPage(vm, onMsg, onConfirm, back)
             "help" -> HelpPage(back)
             else -> AboutPage(back)
         }
@@ -178,19 +184,25 @@ private fun AppearancePage(vm: MainViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SecurityPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> Unit) {
+private fun SecurityPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (String, () -> Unit) -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
     val lock by p.lockEnabled.collectAsState()
     val secure by p.secure.collectAsState()
     val canAuth = remember {
-        BiometricManager.from(ctx).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS
+        val bm = BiometricManager.from(ctx)
+        bm.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS ||
+            bm.canAuthenticate(BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS
     }
     SubPage("Security & privacy", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SwitchRow("App lock (fingerprint, face or phone PIN)", lock) {
-                    if (it && !canAuth) onMsg("Set a screen lock in Android settings first") else p.setLock(it)
+                SwitchRow("App lock (fingerprint, face or phone PIN)", lock) { enable ->
+                    if (enable) {
+                        if (!canAuth) onMsg("Set a screen lock in Android settings first") else p.setLock(true)
+                    } else {
+                        onConfirm("Turn off app lock") { p.setLock(false) }
+                    }
                 }
                 SwitchRow("Hide in recents & block screenshots", secure) { p.setSecure(it) }
                 Spacer(Modifier.height(8.dp))
@@ -412,13 +424,16 @@ private fun RecurringPage(vm: MainViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> Unit) {
+private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (String, () -> Unit) -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
     val auto by p.autoBackup.collectAsState()
     val folder by p.backupUri.collectAsState()
+    val hasPass by p.hasBackupPassphrase.collectAsState()
     val last by p.lastBackup.collectAsState()
     var restoreUri by remember { mutableStateOf<Uri?>(null) }
+    var restoreEncrypted by remember { mutableStateOf(false) }
+    var showPassDialog by remember { mutableStateOf(false) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { u -> if (u != null) vm.exportCsv(u, onMsg) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.importCsv(u, onMsg) }
     val restorer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) restoreUri = u }
@@ -428,49 +443,99 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> U
             p.setBackupUri(u.toString()); BackupScheduler.sync(ctx); onMsg("Backup folder set")
         }
     }
+    LaunchedEffect(restoreUri) {
+        restoreEncrypted = restoreUri?.let { vm.isBackupEncrypted(it) } ?: false
+    }
     val lastText = if (last == 0L) "Never" else Instant.ofEpochMilli(last).atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a", Locale.ENGLISH))
 
     SubPage("Backup, export & import", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Backup (everything)")
-                Text("This app has no cloud, so a backup is your safety net if you lose or reset your phone. Pick a folder (for example one synced by Drive or Syncthing) and Arthak saves a full backup there.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Cap("Encrypted backup (everything)")
+                Text("Backups are encrypted with AES-256-GCM using your passphrase before being written to your chosen folder, so they stay private even if synced with Drive or Syncthing.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Text(if (folder.isBlank()) "Folder: not set" else "Folder: set · last backup $lastText", color = L.text, fontSize = 13.sp)
+                Text(if (hasPass) "Encryption passphrase: set" else "Encryption passphrase: not set (required)", color = if (hasPass) L.green else L.red, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MonoButton(if (hasPass) "Change passphrase" else "Set passphrase", {
+                        onConfirm("Manage backup passphrase") { showPassDialog = true }
+                    }, filled = !hasPass)
                     MonoButton(if (folder.isBlank()) "Choose folder" else "Change folder", { tree.launch(null) }, filled = false)
-                    MonoButton("Back up now", { vm.backupNow(onMsg) })
                 }
-                SwitchRow("Automatic weekly backup", auto) { p.setAutoBackup(it); BackupScheduler.sync(ctx) }
-                MonoButton("Restore from backup file", { restorer.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }, filled = false)
+                MonoButton("Back up now", { vm.backupNow(onMsg) })
+                SwitchRow("Automatic weekly backup", auto) { enable ->
+                    if (enable && !hasPass) {
+                        onMsg("Set a backup passphrase first")
+                    } else {
+                        p.setAutoBackup(enable); BackupScheduler.sync(ctx)
+                    }
+                }
+                MonoButton("Restore from backup file", {
+                    onConfirm("Restore backup") { restorer.launch(arrayOf("application/json", "application/octet-stream", "text/plain")) }
+                }, filled = false)
             }
             Hairline()
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cap("Spreadsheet (CSV)")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    MonoButton("Export CSV", { export.launch("arthak-${LocalDate.now()}.csv") })
+                    MonoButton("Export CSV", { onConfirm("Export transactions to CSV") { export.launch("arthak-${LocalDate.now()}.csv") } })
                     MonoButton("Import CSV", { importer.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream")) }, filled = false)
                 }
                 Text("Files go through Android’s file picker. No storage permission, no network.", color = L.muted, fontSize = 12.sp)
             }
         }
     }
+    if (showPassDialog) {
+        var pass1 by remember { mutableStateOf("") }
+        var pass2 by remember { mutableStateOf("") }
+        var err by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showPassDialog = false }, containerColor = L.surface,
+            title = { Cap("Backup encryption passphrase", color = L.text) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Use at least 8 characters. Keep this passphrase somewhere safe — you will need it to restore backups on another phone.", color = L.muted, fontSize = 13.sp)
+                    Field("Passphrase", pass1, { pass1 = it; err = "" }, secret = true)
+                    Field("Confirm passphrase", pass2, { pass2 = it; err = "" }, secret = true)
+                    if (err.isNotEmpty()) Text(err, color = L.red, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    when {
+                        pass1.trim().length < 8 -> err = "Use at least 8 characters."
+                        pass1 != pass2 -> err = "Passphrases do not match."
+                        else -> {
+                            val ok = p.setBackupPassphrase(pass1)
+                            BackupScheduler.sync(ctx)
+                            onMsg(if (ok) "Backup passphrase saved" else "Could not save passphrase")
+                            showPassDialog = false
+                        }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton({ showPassDialog = false }) { Text("Cancel") } }
+        )
+    }
     restoreUri?.let { u ->
         var confirmText by remember { mutableStateOf("") }
+        var pass by remember { mutableStateOf("") }
+        val ready = confirmText.trim() == "RESTORE" && (!restoreEncrypted || pass.isNotBlank())
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,
             title = { Cap("Restore backup?", color = L.text) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("This replaces everything currently in Arthak — accounts, transactions, budgets and people — with the contents of the backup. This cannot be undone.", color = L.muted, fontSize = 14.sp)
+                    if (restoreEncrypted) Field("Backup passphrase", pass, { pass = it }, secret = true)
                     Field("Type RESTORE to confirm", confirmText, { confirmText = it })
                 }
             },
             confirmButton = {
                 TextButton(
-                    enabled = confirmText.trim() == "RESTORE",
-                    onClick = { vm.restoreBackup(u, onMsg); restoreUri = null }
-                ) { Text("Restore", color = if (confirmText.trim() == "RESTORE") L.red else L.muted) }
+                    enabled = ready,
+                    onClick = { vm.restoreBackup(u, pass.takeIf { restoreEncrypted }, onMsg); restoreUri = null }
+                ) { Text("Restore", color = if (ready) L.red else L.muted) }
             },
             dismissButton = { TextButton({ restoreUri = null }) { Text("Cancel") } }
         )
@@ -504,7 +569,7 @@ private fun HelpPage(onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(16.dp))
                 Cap("Play Protect warning", color = L.text)
-                Text("Play Protect is cautious about new apps from outside the Play Store, especially ones that read notifications. This standard build contains no notification-reading code and no internet access.", color = L.muted, fontSize = 13.sp, lineHeight = 19.sp)
+                Text("Play Protect is cautious about new apps from outside the Play Store, especially ones that read notifications. This standard build contains no notification-reading code. Its only internet use is checking and downloading app updates from your GitHub repository (which you can turn off under App updates).", color = L.muted, fontSize = 13.sp, lineHeight = 19.sp)
                 Step(1, "Install from your file manager (or adb), not directly from a browser or chat app.")
                 Step(2, "If asked, tap “Scan app” / “Send for security check”. Once Google has seen the app, the prompt stops.")
                 Step(3, "Keep installing updates signed with the same key, so the app stays recognised.")
@@ -530,13 +595,13 @@ private fun AboutPage(onBack: () -> Unit) {
 }
 
 @Composable
-private fun UpdatesPage(vm: MainViewModel, onBack: () -> Unit) {
+private fun UpdatesPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (String, () -> Unit) -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
     val st by Updater.state.collectAsState()
     val auto by p.updateCheck.collectAsState()
     val repoSaved by p.updateRepo.collectAsState()
-    var repo by remember { mutableStateOf(repoSaved.ifBlank { BuildConfig.GITHUB_REPO }) }
+    var repo by remember(repoSaved) { mutableStateOf(repoSaved.ifBlank { BuildConfig.GITHUB_REPO }) }
     LaunchedEffect(Unit) { Updater.check(ctx, manual = true) }
     SubPage("App updates", onBack) {
         item {
@@ -566,8 +631,21 @@ private fun UpdatesPage(vm: MainViewModel, onBack: () -> Unit) {
                 }
                 MonoButton("Check now", { Updater.check(ctx, manual = true) }, filled = false)
                 SwitchRow("Check for updates daily and tell me", auto) { p.setUpdateCheck(it); UpdateScheduler.sync(ctx) }
-                Field("GitHub repository (owner/name)", repo, { repo = it; p.setUpdateRepo(it) })
-                Text("New versions come from the Releases page of that repository. Android asks you to confirm each install once. The repository must be public for the app to see it.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Field("GitHub repository (owner/name)", repo, { repo = it })
+                if (repo.trim() != repoSaved.ifBlank { BuildConfig.GITHUB_REPO }.trim()) {
+                    MonoButton("Save repository", {
+                        val candidate = repo.trim()
+                        if (!Updater.isValidRepo(candidate)) {
+                            onMsg("Enter a valid GitHub repository as owner/name")
+                        } else {
+                            onConfirm("Change update repository") {
+                                p.setUpdateRepo(candidate)
+                                onMsg("Update repository saved")
+                            }
+                        }
+                    }, filled = false)
+                }
+                Text("New versions come from the Releases page of that repository and must match Arthak's package name and signing key. Android asks you to confirm each install once.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }

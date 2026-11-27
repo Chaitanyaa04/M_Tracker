@@ -15,6 +15,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val pid = i.getLongExtra(Extras.PENDING, 0L)
         val acc = i.getLongExtra(Extras.ACCOUNT, 0L)
         val nm = NotificationManagerCompat.from(c)
+        // Defense-in-depth: never mutate ledger data from a notification action while App Lock is enabled.
+        if (AppPrefs.get(c).lockEnabled.value) {
+            nm.cancel(nid)
+            return
+        }
         when (i.action) {
             // Wrong call: forget this prompt and teach the detector to be a little less eager for this app.
             // The quiet period is NOT reset, so it can't ping again straight away.
@@ -40,7 +45,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             Extras.ACTION_AMOUNT -> {
                 val typed = RemoteInput.getResultsFromIntent(i)?.getCharSequence("amount")?.toString().orEmpty()
                 val amt = typed.filter { it.isDigit() || it == '.' }.toDoubleOrNull()
-                if (amt == null || amt <= 0) { nm.cancel(nid); return }
+                if (amt == null || !amt.isFinite() || amt <= 0.0 || amt > 1e12) { nm.cancel(nid); return }
                 nm.cancel(nid)
                 async(c) { db ->
                     val d = db.dao()

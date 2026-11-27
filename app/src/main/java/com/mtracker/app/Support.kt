@@ -5,10 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Process
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.security.KeyStore
+import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 object Extras {
     const val TYPE = "x_type"
@@ -19,10 +30,61 @@ object Extras {
     const val PKG = "x_pkg"
     const val PENDING = "x_pending"
     const val OPEN = "x_open"
+    const val TOKEN = "x_token"
     const val ACTION_SAME = "com.mtracker.app.SAME_AGAIN"
     const val ACTION_AMOUNT = "com.mtracker.app.ENTER_AMOUNT"
     const val ACTION_NO_SPEND = "com.mtracker.app.NO_SPEND"
     const val ACTION_WRONG = "com.mtracker.app.WRONG_CALL"
+}
+
+/** Reads UTF-8 text from an InputStream with a strict byte cap to prevent OOM on oversized files/responses. */
+fun readTextBounded(input: InputStream, maxBytes: Int = 10 * 1024 * 1024): String {
+    val out = ByteArrayOutputStream()
+    val buf = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val n = input.read(buf)
+        if (n < 0) break
+        total += n
+        if (total > maxBytes) throw IllegalArgumentException("File exceeds maximum allowed size (${maxBytes / (1024 * 1024)} MB).")
+        out.write(buf, 0, n)
+    }
+    return out.toString(Charsets.UTF_8.name())
+}
+
+/** Hardware/OS-backed AES-GCM wrapper for storing the backup passphrase without saving it in plaintext. */
+private object LocalKeyWrap {
+    private const val ALIAS = "arthak_backup_pass_wrap"
+    private const val STORE = "AndroidKeyStore"
+
+    private fun getOrCreateKey(): SecretKey {
+        val ks = KeyStore.getInstance(STORE).apply { load(null) }
+        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, STORE)
+        gen.init(
+            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return gen.generateKey()
+    }
+
+    fun encrypt(plain: String): Pair<String, String> {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val ct = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(cipher.iv, Base64.NO_WRAP) to Base64.encodeToString(ct, Base64.NO_WRAP)
+    }
+
+    fun decrypt(ivB64: String, ctB64: String): String? = runCatching {
+        val iv = Base64.decode(ivB64, Base64.NO_WRAP)
+        val ct = Base64.decode(ctB64, Base64.NO_WRAP)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+        String(cipher.doFinal(ct), Charsets.UTF_8)
+    }.getOrNull()
 }
 
 /** Local settings (SharedPreferences). apps maps packageName -> default accountId (0 = none). */
@@ -37,10 +99,11 @@ class AppPrefs private constructor(c: Context) {
     val hideBalances = MutableStateFlow(sp.getBoolean("hide", false))
     val onboarded = MutableStateFlow(sp.getBoolean("onboarded", false))
     val lockEnabled = MutableStateFlow(sp.getBoolean("lock", false))
-    val secure = MutableStateFlow(sp.getBoolean("secure", false))
+    val secure = MutableStateFlow(sp.getBoolean("secure", true))
     val haptics = MutableStateFlow(sp.getBoolean("haptics", true))
     val autoBackup = MutableStateFlow(sp.getBoolean("autobackup", false))
     val backupUri = MutableStateFlow(sp.getString("backupuri", "") ?: "")
+    val hasBackupPassphrase = MutableStateFlow(!sp.getString("bp_ct", "").isNullOrBlank())
     val lastBackup = MutableStateFlow(sp.getLong("lastbackup", 0L))
     val cooldownSec = MutableStateFlow(sp.getInt("cooldown", 120))            // quiet period after a prompt: 10 s to 10 min
     val liveDetect = MutableStateFlow(sp.getBoolean("live", false))          // instant detection needs a status notification
@@ -50,6 +113,16 @@ class AppPrefs private constructor(c: Context) {
     val latestTag = MutableStateFlow(sp.getString("latesttag", "") ?: "")
     val lastUpdateCheck = MutableStateFlow(sp.getLong("lastupd", 0L))
     val notifiedTag = MutableStateFlow(sp.getString("notifiedtag", "") ?: "")
+
+    /** Per-install random secret used to verify internal notification PendingIntents arriving at exported MainActivity. */
+    val intentToken: String by lazy {
+        sp.getString("intent_token", null)?.takeIf { it.length >= 32 } ?: run {
+            val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+            val tok = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            sp.edit().putString("intent_token", tok).apply()
+            tok
+        }
+    }
 
     private fun load(): Map<String, Long> =
         (sp.getString("apps", "") ?: "").split(";").filter { it.contains("=") }
@@ -67,6 +140,25 @@ class AppPrefs private constructor(c: Context) {
     fun setHaptics(v: Boolean) { haptics.value = v; sp.edit().putBoolean("haptics", v).apply() }
     fun setAutoBackup(v: Boolean) { autoBackup.value = v; sp.edit().putBoolean("autobackup", v).apply() }
     fun setBackupUri(v: String) { backupUri.value = v; sp.edit().putString("backupuri", v).apply() }
+    fun setBackupPassphrase(passphrase: String): Boolean {
+        val trimmed = passphrase.trim()
+        if (trimmed.isEmpty()) {
+            sp.edit().remove("bp_iv").remove("bp_ct").apply()
+            hasBackupPassphrase.value = false
+            return true
+        }
+        return runCatching {
+            val (iv, ct) = LocalKeyWrap.encrypt(trimmed)
+            sp.edit().putString("bp_iv", iv).putString("bp_ct", ct).apply()
+            hasBackupPassphrase.value = true
+            true
+        }.getOrDefault(false)
+    }
+    fun getBackupPassphrase(): String? {
+        val iv = sp.getString("bp_iv", null) ?: return null
+        val ct = sp.getString("bp_ct", null) ?: return null
+        return LocalKeyWrap.decrypt(iv, ct)?.takeIf { it.isNotBlank() }
+    }
     fun setLastBackup(v: Long) { lastBackup.value = v; sp.edit().putLong("lastbackup", v).apply() }
     fun setCooldown(v: Int) { cooldownSec.value = v; sp.edit().putInt("cooldown", v).apply() }
     fun cooldownMs(): Long = cooldownSec.value * 1000L

@@ -1,28 +1,56 @@
 name: Build Arthak AUTOFILL APK (optional, manual)
 on: workflow_dispatch
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.KEYSTORE_B64 != '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      # Actions are pinned to immutable commit SHAs (supply-chain hardening):
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - uses: actions/setup-java@c5195efecf7bdfc982ee8bae7a71cb8b1152acb0 # v4.7.1
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v4
+
+      - uses: android-actions/setup-android@9fc6c4e9069584725b706bfe858ff7305775f4b9 # v3.2.2
         with:
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: gradle/actions/setup-gradle@cc4fc85e6b35bafd578d536afe37e762614aec71 # v4.6.0
         with: { gradle-version: "8.9" }
+
       - name: Decode signing key
-        env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
-        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-      - name: Build
+        if: env.HAS_KEY == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build signed release APK
+        if: env.HAS_KEY == 'true'
         env:
           KEYSTORE_FILE: ${{ runner.temp }}/release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: gradle assembleAutofillRelease --no-daemon
-      - uses: actions/upload-artifact@v4
+
+      - name: Build debug APK (no signing key yet)
+        if: env.HAS_KEY != 'true'
+        run: gradle assembleAutofillDebug --no-daemon
+
+      - name: Remove decoded signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      - uses: actions/upload-artifact@0b7f96235137c4898467d4b0a68b7bb3dc9aa700 # v4.6.0
         with:
           name: Arthak-autofill-apk
-          path: app/build/outputs/apk/**/*.apk
+          path: app/build/outputs/apk/autofill/*/*.apk
+          if-no-files-found: error

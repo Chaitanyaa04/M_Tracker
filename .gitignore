@@ -1,0 +1,14 @@
+*.jks
+*.keystore
+*.keystore.*
+*.p12
+*.pem
+*.key
+*.base64
+local.properties
+build/
+app/build/
+.gradle/
+.idea/
+.kotlin/
+dist/

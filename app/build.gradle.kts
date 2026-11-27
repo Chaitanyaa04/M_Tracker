@@ -17,18 +17,17 @@ android {
         versionName = (project.findProperty("versionName") as String?) ?: "1.2.0"
         // owner/repo to look for updates in; GitHub Actions fills this in automatically
         buildConfigField("String", "GITHUB_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "YOUR_USER/Arthak"}\"")
+        buildConfigField("boolean", "AUTOFILL", "false")
     }
 
-    // standard  = recommended. No notification-reading code at all (fewer Play Protect flags).
-    // autofill  = optional extra: adds the notification listener for ₹ amount / merchant auto-fill.
-    flavorDimensions += "mode"
-    productFlavors {
-        create("standard") { dimension = "mode"; buildConfigField("boolean", "AUTOFILL", "false") }
-        create("autofill") { dimension = "mode"; buildConfigField("boolean", "AUTOFILL", "true"); versionNameSuffix = "-autofill" }
-    }
-
-    // Release signing comes from environment variables (see README / GitHub Actions workflow).
+    // Debug signing uses the workspace debug.keystore; release signing comes from environment variables.
     signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         create("release") {
             val ks = System.getenv("KEYSTORE_FILE")
             if (ks != null) {
@@ -40,6 +39,11 @@ android {
         }
     }
     buildTypes {
+        debug {
+            if (file("${rootDir}/debug.keystore").exists()) {
+                signingConfig = signingConfigs.getByName("debugConfig")
+            }
+        }
         release {
             // R8 strips the (large) icon pack down to the icons actually used.
             isMinifyEnabled = true

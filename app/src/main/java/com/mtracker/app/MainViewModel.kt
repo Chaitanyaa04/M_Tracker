@@ -213,18 +213,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         done(r.fold({ "Imported $it transactions" }, { "Import failed: not a valid ledger CSV" }))
     }
 
-    fun restoreBackup(uri: Uri, done: (String) -> Unit) = viewModelScope.launch {
+    suspend fun isBackupEncrypted(uri: Uri): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val app = getApplication<Application>()
+            val txt = app.contentResolver.openInputStream(uri)!!.use { readTextBounded(it) }
+            BackupManager.isEncrypted(txt)
+        }.getOrDefault(false)
+    }
+
+    fun restoreBackup(uri: Uri, passphrase: String?, done: (String) -> Unit) = viewModelScope.launch {
         val r = runCatching {
             val app = getApplication<Application>()
-            val txt = app.contentResolver.openInputStream(uri)!!.bufferedReader().use { it.readText() }
-            BackupManager.restore(AppDatabase.get(app), txt)
+            val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                app.contentResolver.openInputStream(uri)!!.use { readTextBounded(it) }
+            }
+            BackupManager.restore(AppDatabase.get(app), txt, passphrase)
         }
-        done(r.fold({ "Restored $it transactions" }, { "Restore failed: not an Arthak backup" }))
+        done(r.fold(
+            { "Restored $it transactions" },
+            { "Restore failed: check the backup file and passphrase" }
+        ))
     }
 
     fun backupNow(done: (String) -> Unit) = viewModelScope.launch {
-        val ok = BackupManager.backupToFolder(getApplication<Application>())
-        done(if (ok) "Backup saved to your folder" else "Choose a backup folder first")
+        val msg = when (BackupManager.backupToFolder(getApplication<Application>())) {
+            BackupManager.BackupStatus.OK -> "Encrypted backup saved to your folder"
+            BackupManager.BackupStatus.NO_FOLDER -> "Choose a backup folder first"
+            BackupManager.BackupStatus.NO_PASSPHRASE -> "Set a backup passphrase first to encrypt backups"
+            BackupManager.BackupStatus.FAILED -> "Backup failed"
+        }
+        done(msg)
     }
 
     /** Newest transaction that has a route, for "return trip / continue" suggestions. */

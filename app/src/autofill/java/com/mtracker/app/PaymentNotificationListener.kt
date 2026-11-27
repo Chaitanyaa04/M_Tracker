@@ -21,7 +21,8 @@ class PaymentNotificationListener : NotificationListenerService() {
             ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT)
         ).joinToString(" ")
         if (!DEBIT.containsMatchIn(text) || CREDIT.containsMatchIn(text)) return
-        val amount = AMOUNT.find(text)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull() ?: return
+        val amount = AMOUNT.find(text)?.groupValues?.get(1)?.replace(",", "")?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 } ?: return
         val merchant = MERCHANT.find(text)?.groupValues?.get(1)?.trim()
 
         val now = System.currentTimeMillis()

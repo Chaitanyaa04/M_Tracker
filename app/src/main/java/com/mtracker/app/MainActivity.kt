@@ -57,9 +57,12 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        if (vm.prefs.secure.value || vm.prefs.lockEnabled.value) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         enableEdgeToEdge()
         if (savedInstanceState == null) handle(intent)
-        setContent { App(vm) { authenticate() } }
+        setContent { App(vm, onAuth = { authenticate() }, onConfirm = { title, ok -> confirmSensitiveAction(title, ok) }) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -80,12 +83,22 @@ class MainActivity : FragmentActivity() {
         vm.stoppedAt = SystemClock.elapsedRealtime()
     }
 
+    /** Picks BIOMETRIC_STRONG | DEVICE_CREDENTIAL if available, falling back to DEVICE_CREDENTIAL alone. */
+    private fun resolveAllowedAuthenticators(): Pair<Int, Int> {
+        val bm = BiometricManager.from(this)
+        val strongOrPin = BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val statusStrong = bm.canAuthenticate(strongOrPin)
+        if (statusStrong == BiometricManager.BIOMETRIC_SUCCESS) return strongOrPin to statusStrong
+        val pinOnly = BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val statusPin = bm.canAuthenticate(pinOnly)
+        if (statusPin == BiometricManager.BIOMETRIC_SUCCESS) return pinOnly to statusPin
+        return strongOrPin to statusStrong
+    }
+
     private fun authenticate() {
-        val auth = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        when (BiometricManager.from(this).canAuthenticate(auth)) {
-            BiometricManager.BIOMETRIC_SUCCESS -> Unit // good to go
-            // No authenticator available at all (e.g. no screen lock on the phone):
-            // fail CLOSED — keep the app locked and tell the user to set a screen lock.
+        val (auth, status) = resolveAllowedAuthenticators()
+        when (status) {
+            BiometricManager.BIOMETRIC_SUCCESS -> Unit
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
                 vm.locked.value = true
                 startActivity(
@@ -94,8 +107,12 @@ class MainActivity : FragmentActivity() {
                 Toast.makeText(this, "Set a screen lock (or biometrics) to unlock Arthak.", Toast.LENGTH_LONG).show()
                 return
             }
-            // Hardware unavailable / temporarily unusable: nothing to prompt with; don't hard-block the app.
-            else -> { vm.locked.value = false; return }
+            // Fail CLOSED on any authenticator error rather than unlocking without verification.
+            else -> {
+                vm.locked.value = true
+                Toast.makeText(this, "Device authentication unavailable. Please try again.", Toast.LENGTH_LONG).show()
+                return
+            }
         }
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vm.locked.value = false }
@@ -108,14 +125,63 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    /** Reminder / shortcut / check-in actions arrive here as extras. */
+    /** Requires fresh biometric/PIN confirmation for sensitive actions when App Lock is enabled. */
+    private fun confirmSensitiveAction(title: String, onConfirmed: () -> Unit) {
+        if (!vm.prefs.lockEnabled.value) { onConfirmed(); return }
+        val (auth, status) = resolveAllowedAuthenticators()
+        if (status != BiometricManager.BIOMETRIC_SUCCESS) {
+            Toast.makeText(this, "Verify device lock settings before continuing.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { onConfirmed() }
+        })
+        prompt.authenticate(
+            BiometricPrompt.PromptInfo.Builder().setTitle(title).setAllowedAuthenticators(auth).build()
+        )
+    }
+
+    /** Reminder / shortcut / check-in actions arrive here as extras. Only trusted internal PendingIntents may supply privileged extras. */
     private fun handle(i: Intent?) {
-        i?.getStringExtra(Extras.OPEN)?.let { vm.settingsTarget.value = it; i.removeExtra(Extras.OPEN) }
-        val type = i?.getStringExtra(Extras.TYPE) ?: return
-        NotificationManagerCompat.from(this).cancel(i.getIntExtra(Extras.NOTIF_ID, -1))
-        val amount = if (i.hasExtra(Extras.AMOUNT)) i.getDoubleExtra(Extras.AMOUNT, 0.0) else null
-        vm.fromReminder(type, i.getLongExtra(Extras.ACCOUNT, 0L), amount, i.getStringExtra(Extras.MERCHANT), i.getLongExtra(Extras.PENDING, 0L))
-        i.removeExtra(Extras.TYPE)
+        if (i == null) return
+        val suppliedToken = i.getStringExtra(Extras.TOKEN)
+        val trusted = suppliedToken != null &&
+            java.security.MessageDigest.isEqual(
+                suppliedToken.toByteArray(Charsets.UTF_8),
+                vm.prefs.intentToken.toByteArray(Charsets.UTF_8)
+            )
+        i.removeExtra(Extras.TOKEN)
+
+        if (trusted) {
+            i.getStringExtra(Extras.OPEN)?.takeIf { it in ALLOWED_OPEN_PAGES }?.let {
+                vm.settingsTarget.value = it
+            }
+            i.removeExtra(Extras.OPEN)
+            val type = i.getStringExtra(Extras.TYPE) ?: return
+            if (type !in ALLOWED_INTERNAL_TYPES) { i.removeExtra(Extras.TYPE); return }
+            val nid = i.getIntExtra(Extras.NOTIF_ID, -1)
+            if (nid >= 0) NotificationManagerCompat.from(this).cancel(nid)
+            val amount = if (i.hasExtra(Extras.AMOUNT)) {
+                i.getDoubleExtra(Extras.AMOUNT, 0.0).takeIf { it.isFinite() && it > 0.0 }
+            } else null
+            val merchant = i.getStringExtra(Extras.MERCHANT)?.trim()?.take(80)
+            vm.fromReminder(type, i.getLongExtra(Extras.ACCOUNT, 0L), amount, merchant, i.getLongExtra(Extras.PENDING, 0L))
+            i.removeExtra(Extras.TYPE)
+        } else {
+            // Untrusted/external intents (including static launcher shortcuts) may only open an empty EXPENSE or INCOME draft.
+            val type = i.getStringExtra(Extras.TYPE)
+            if (type in ALLOWED_SHORTCUT_TYPES) {
+                vm.fromReminder(type!!, 0L, null, null, 0L)
+            }
+            i.removeExtra(Extras.TYPE)
+            i.removeExtra(Extras.OPEN)
+        }
+    }
+
+    companion object {
+        private val ALLOWED_OPEN_PAGES = setOf("home", "updates", "security", "data", "reminders")
+        private val ALLOWED_INTERNAL_TYPES = setOf("EXPENSE", "INCOME", "TRANSFER")
+        private val ALLOWED_SHORTCUT_TYPES = setOf("EXPENSE", "INCOME")
     }
 }
 
@@ -123,7 +189,7 @@ private val TABS = listOf("Ledger", "Accounts", "Plan", "Insights")
 private val TAB_ICONS = listOf(Icons.Rounded.ReceiptLong, Icons.Rounded.AccountBalanceWallet, Icons.Rounded.Flag, Icons.Rounded.Insights)
 
 @Composable
-fun App(vm: MainViewModel, onAuth: () -> Unit) {
+fun App(vm: MainViewModel, onAuth: () -> Unit, onConfirm: (String, () -> Unit) -> Unit) {
     val ctx = LocalContext.current
     val theme by vm.prefs.theme.collectAsState()
     val onboarded by vm.prefs.onboarded.collectAsState()
@@ -131,8 +197,8 @@ fun App(vm: MainViewModel, onAuth: () -> Unit) {
     val secure by vm.prefs.secure.collectAsState()
     val haptics by vm.prefs.haptics.collectAsState()
     val win = (ctx as Activity).window
-    LaunchedEffect(secure) {
-        if (secure) win.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else win.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    LaunchedEffect(secure, locked) {
+        if (secure || locked) win.addFlags(WindowManager.LayoutParams.FLAG_SECURE) else win.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
     LedgerTheme(theme) {
         CompositionLocalProvider(LocalHaptics provides haptics) {
@@ -140,7 +206,7 @@ fun App(vm: MainViewModel, onAuth: () -> Unit) {
                 if (!onboarded) Onboarding(vm) {
                     vm.prefs.setOnboarded(true)
                     MonitorController.sync(ctx); CheckinScheduler.sync(ctx)
-                } else Shell(vm)
+                } else Shell(vm, onConfirm)
                 if (locked && onboarded) LockScreen(onAuth)
             }
         }
@@ -183,7 +249,7 @@ private fun FloatingNav(tab: Int, showSettings: Boolean, onTab: (Int) -> Unit, o
 }
 
 @Composable
-private fun Shell(vm: MainViewModel) {
+private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val ctx = LocalContext.current
     val mode by vm.prefs.mode.collectAsState()
     val apps by vm.prefs.apps.collectAsState()
@@ -270,7 +336,7 @@ private fun Shell(vm: MainViewModel) {
               Box(Modifier.weight(1f).fillMaxWidth()) {
                 Crossfade(if (showSettings) 99 else tab, label = "screen") { t ->
                     when (t) {
-                        99 -> SettingsScreen(vm, { m -> scope.launch { snackbar.showSnackbar(m) } }, startPage = settingsStart)
+                        99 -> SettingsScreen(vm, { m -> scope.launch { snackbar.showSnackbar(m) } }, startPage = settingsStart, onConfirm = onConfirm)
                         0 -> LedgerScreen(
                             vm, status,
                             onStatus = {

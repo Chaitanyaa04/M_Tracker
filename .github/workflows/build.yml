@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}   # or run by hand for a test build
 
 permissions:
-  contents: write         # lets the workflow create the GitHub Release
+  contents: write         # needed to publish GitHub Releases on version tags
 
 jobs:
   build:
@@ -30,25 +30,38 @@ jobs:
 
       - name: Work out the version
         id: ver
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUM: ${{ github.run_number }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.${GITHUB_RUN_NUMBER}-test"; fi
-          echo "name=$V" >> "$GITHUB_OUTPUT"
-          # versionCode must be strictly increasing across ALL builds; derive it from the
-          # tag's semver (major*10000 + minor*100 + patch) instead of the run number, which
-          # resets per-workflow and can regress/duplicate. Test builds get a high base so
-          # they never collide with real releases.
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            IFS=. read -r MA MI PA <<< "${GITHUB_REF_NAME#v}"
-            VC=$(( ${MA:-0}*10000 + ${MI:-0}*100 + ${PA:-0} ))
+          set -euo pipefail
+          if [[ "$REF" == refs/tags/v* ]]; then
+            # Strict semver allowlist prevents shell or arithmetic injection from tag names.
+            if [[ ! "$REF_NAME" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Invalid release tag format: expected vMAJOR.MINOR.PATCH" >&2
+              exit 1
+            fi
+            MA="${BASH_REMATCH[1]}"
+            MI="${BASH_REMATCH[2]}"
+            PA="${BASH_REMATCH[3]}"
+            V="${MA}.${MI}.${PA}"
+            VC=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
           else
-            VC=$(( 900000 + GITHUB_RUN_NUMBER ))
+            V="0.0.${RUN_NUM}-test"
+            VC=$(( 900000 + 10#$RUN_NUM ))
           fi
+          echo "name=$V" >> "$GITHUB_OUTPUT"
           echo "code=$VC" >> "$GITHUB_OUTPUT"
 
       - name: Decode signing key
         if: env.HAS_KEY == 'true'
-        env: { KEYSTORE_B64: "${{ secrets.KEYSTORE_B64 }}" }
-        run: echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
 
       - name: Build signed release APK
         if: env.HAS_KEY == 'true'
@@ -57,16 +70,28 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle assembleStandardRelease --no-daemon -PversionName=${{ steps.ver.outputs.name }} -PversionCode=${{ steps.ver.outputs.code }}
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+        run: gradle assembleRelease --no-daemon "-PversionName=$VERSION_NAME" "-PversionCode=$VERSION_CODE"
 
       - name: Build debug APK (no signing key yet)
         if: env.HAS_KEY != 'true'
-        run: gradle assembleStandardDebug --no-daemon -PversionName=${{ steps.ver.outputs.name }} -PversionCode=${{ steps.ver.outputs.code }}
+        env:
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
+          VERSION_CODE: ${{ steps.ver.outputs.code }}
+        run: gradle assembleDebug --no-daemon "-PversionName=$VERSION_NAME" "-PversionCode=$VERSION_CODE"
+
+      - name: Remove decoded signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
 
       - name: Name the APK
+        env:
+          VERSION_NAME: ${{ steps.ver.outputs.name }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          cp app/build/outputs/apk/standard/*/*.apk "dist/Arthak-${{ steps.ver.outputs.name }}.apk"
+          cp app/build/outputs/apk/*/*.apk "dist/Arthak-${VERSION_NAME}.apk"
 
       - uses: actions/upload-artifact@0b7f96235137c4898467d4b0a68b7bb3dc9aa700 # v4.6.0
         with: { name: Arthak-apk, path: dist/*.apk, if-no-files-found: error }
