@@ -456,11 +456,22 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> U
         }
     }
     restoreUri?.let { u ->
+        var confirmText by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,
             title = { Cap("Restore backup?", color = L.text) },
-            text = { Text("This replaces everything currently in Arthak with the contents of the backup.", color = L.muted, fontSize = 14.sp) },
-            confirmButton = { TextButton({ vm.restoreBackup(u, onMsg); restoreUri = null }) { Text("Restore", color = L.red) } },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("This replaces everything currently in Arthak — accounts, transactions, budgets and people — with the contents of the backup. This cannot be undone.", color = L.muted, fontSize = 14.sp)
+                    Field("Type RESTORE to confirm", confirmText, { confirmText = it })
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = confirmText.trim() == "RESTORE",
+                    onClick = { vm.restoreBackup(u, onMsg); restoreUri = null }
+                ) { Text("Restore", color = if (confirmText.trim() == "RESTORE") L.red else L.muted) }
+            },
             dismissButton = { TextButton({ restoreUri = null }) { Text("Cancel") } }
         )
     }

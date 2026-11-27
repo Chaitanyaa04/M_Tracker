@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -81,12 +82,26 @@ class MainActivity : FragmentActivity() {
 
     private fun authenticate() {
         val auth = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        if (BiometricManager.from(this).canAuthenticate(auth) != BiometricManager.BIOMETRIC_SUCCESS) {
-            vm.locked.value = false   // no screen lock set on the phone: nothing to authenticate with
-            return
+        when (BiometricManager.from(this).canAuthenticate(auth)) {
+            BiometricManager.BIOMETRIC_SUCCESS -> Unit // good to go
+            // No authenticator available at all (e.g. no screen lock on the phone):
+            // fail CLOSED — keep the app locked and tell the user to set a screen lock.
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
+                vm.locked.value = true
+                startActivity(
+                    Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+                Toast.makeText(this, "Set a screen lock (or biometrics) to unlock Arthak.", Toast.LENGTH_LONG).show()
+                return
+            }
+            // Hardware unavailable / temporarily unusable: nothing to prompt with; don't hard-block the app.
+            else -> { vm.locked.value = false; return }
         }
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { vm.locked.value = false }
+            // Fail closed: if the user cancels or auth fails, stay on the lock screen.
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) { vm.locked.value = true }
+            override fun onAuthenticationFailed() { vm.locked.value = true }
         })
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder().setTitle("Unlock Arthak").setAllowedAuthenticators(auth).build()
