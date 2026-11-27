@@ -82,8 +82,8 @@ object BackupManager {
         require(o.optString("app") in listOf("Arthak", "M_Tracker") && o.optBoolean("encrypted", false)) {
             "Not an encrypted Arthak backup."
         }
-        val iter = o.optInt("iter", KDF_ITER)
-        require(iter in 100_000..1_000_000) { "Unsupported backup key derivation settings." }
+        // Always use our own KDF cost; never trust an iteration count from an untrusted backup.
+        val iter = KDF_ITER
         val salt = Base64.decode(o.getString("salt"), Base64.NO_WRAP)
         val iv = Base64.decode(o.getString("iv"), Base64.NO_WRAP)
         val ct = Base64.decode(o.getString("ct"), Base64.NO_WRAP)
@@ -256,8 +256,11 @@ object BackupManager {
             dir.findFile(name)?.delete()
             val f = dir.createFile("application/json", name) ?: return@withContext BackupStatus.FAILED
             c.contentResolver.openOutputStream(f.uri, "wt")!!.use { it.write(encryptedJson.toByteArray(Charsets.UTF_8)) }
-            dir.listFiles().filter { (it.name?.startsWith("arthak_backup_") == true || it.name?.startsWith("m_tracker_backup_") == true) }
-                .sortedByDescending { it.name }.drop(8).forEach { it.delete() }
+            // Only prune files this app created and tracked — never touch unrelated user files.
+            p.addBackupFile(f.uri.toString())
+            p.pruneBackupFiles().forEach { uriS ->
+                DocumentFile.fromSingleUri(c, Uri.parse(uriS))?.delete()
+            }
             p.setLastBackup(System.currentTimeMillis())
             BackupStatus.OK
         } catch (e: Exception) { BackupStatus.FAILED }

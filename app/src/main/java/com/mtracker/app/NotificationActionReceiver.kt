@@ -42,6 +42,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 }
             }
             // Type just the amount in the notification; the head defaults to what you last used on this account.
+            // MUTABLE PendingIntent (needed by RemoteInput): extras can be overwritten by the sender,
+            // so derive account/pending ID from the DB and only accept matching values.
             Extras.ACTION_AMOUNT -> {
                 val typed = RemoteInput.getResultsFromIntent(i)?.getCharSequence("amount")?.toString().orEmpty()
                 val amt = typed.filter { it.isDigit() || it == '.' }.toDoubleOrNull()
@@ -49,10 +51,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 nm.cancel(nid)
                 async(c) { db ->
                     val d = db.dao()
-                    val account = if (acc != 0L) acc else d.allAccounts().firstOrNull()?.id ?: return@async
+                    val pending = d.pendingById(nid.toLong()) ?: return@async
+                    if ((acc != 0L && acc != pending.accountId) || (pid != 0L && pid != pending.id)) return@async
+                    val account = pending.accountId.takeIf { it != 0L } ?: d.allAccounts().firstOrNull()?.id ?: return@async
                     val head = d.lastExpenseFor(account)?.category ?: "Other"
                     d.insert(Txn(type = "EXPENSE", amount = round2(amt), date = today(), category = head, accountId = account, createdAt = System.currentTimeMillis()))
-                    if (pid != 0L) d.deletePending(pid)
+                    d.deletePending(pending.id)
                     ReminderNotifier.confirm(c, "${inr(amt)} · $head. Open the app to add a title.")
                 }
             }

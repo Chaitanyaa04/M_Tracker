@@ -48,6 +48,7 @@ interface LedgerDao {
     @Query("SELECT * FROM pending ORDER BY time DESC") fun pending(): Flow<List<Pending>>
     @Insert suspend fun insertPending(p: Pending): Long
     @Query("DELETE FROM pending WHERE id = :id") suspend fun deletePending(id: Long)
+    @Query("SELECT * FROM pending WHERE id = :id") suspend fun pendingById(id: Long): Pending?
     @Query("SELECT COUNT(*) FROM pending") suspend fun pendingCount(): Int
 
     // recurring

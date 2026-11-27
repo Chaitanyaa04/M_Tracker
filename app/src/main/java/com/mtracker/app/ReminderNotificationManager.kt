@@ -141,7 +141,7 @@ object ReminderNotifier {
         }
         fun bc(action: String, rc: Int, mutable: Boolean = false) = PendingIntent.getBroadcast(
             c, nid * 8 + rc,
-            Intent(c, NotificationActionReceiver::class.java).setAction(action)
+            Intent(c, NotificationActionReceiver::class.java).setAction(action).setPackage(c.packageName)
                 .putExtra(Extras.NOTIF_ID, nid).putExtra(Extras.PKG, pkg).putExtra(Extras.PENDING, pid).putExtra(Extras.ACCOUNT, accountId),
             PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
         )

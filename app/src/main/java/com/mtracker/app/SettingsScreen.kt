@@ -616,7 +616,7 @@ private fun UpdatesPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (
                             is UpdState.Available -> {
                                 Text("${s.info.tag} is available", color = L.text, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                                 if (s.info.notes.isNotBlank()) Text(s.info.notes.trim().take(420), color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
-                                MonoButton("Update now", { Updater.downloadAndInstall(ctx, s.info) }, Modifier.fillMaxWidth())
+                                MonoButton("Update now", { onConfirm("Install app update") { Updater.downloadAndInstall(ctx, s.info) } }, Modifier.fillMaxWidth())
                             }
                             is UpdState.Downloading -> {
                                 Text("Downloading… ${s.pct}%", color = L.text, fontSize = 14.sp)

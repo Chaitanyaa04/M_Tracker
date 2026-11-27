@@ -20,14 +20,8 @@ android {
         buildConfigField("boolean", "AUTOFILL", "false")
     }
 
-    // Debug signing uses the workspace debug.keystore; release signing comes from environment variables.
+    // Release signing comes from environment variables; debug builds use AGP's default keystore.
     signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
         create("release") {
             val ks = System.getenv("KEYSTORE_FILE")
             if (ks != null) {
@@ -39,11 +33,6 @@ android {
         }
     }
     buildTypes {
-        debug {
-            if (file("${rootDir}/debug.keystore").exists()) {
-                signingConfig = signingConfigs.getByName("debugConfig")
-            }
-        }
         release {
             // R8 strips the (large) icon pack down to the icons actually used.
             isMinifyEnabled = true

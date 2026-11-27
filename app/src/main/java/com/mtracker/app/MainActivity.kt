@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
 import android.widget.Toast
@@ -73,14 +72,10 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         val p = vm.prefs
-        if (p.lockEnabled.value && p.onboarded.value &&
-            (vm.stoppedAt == 0L || SystemClock.elapsedRealtime() - vm.stoppedAt > 20_000)
-        ) { vm.locked.value = true; authenticate() }
-    }
-
-    override fun onStop() {
-        super.onStop()
-        vm.stoppedAt = SystemClock.elapsedRealtime()
+        if (p.lockEnabled.value && p.onboarded.value) {
+            vm.locked.value = true
+            authenticate()
+        }
     }
 
     /** Picks BIOMETRIC_STRONG | DEVICE_CREDENTIAL if available, falling back to DEVICE_CREDENTIAL alone. */

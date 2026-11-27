@@ -105,6 +105,7 @@ class AppPrefs private constructor(c: Context) {
     val backupUri = MutableStateFlow(sp.getString("backupuri", "") ?: "")
     val hasBackupPassphrase = MutableStateFlow(!sp.getString("bp_ct", "").isNullOrBlank())
     val lastBackup = MutableStateFlow(sp.getLong("lastbackup", 0L))
+    val backupFiles = MutableStateFlow(loadBackupFiles())
     val cooldownSec = MutableStateFlow(sp.getInt("cooldown", 120))            // quiet period after a prompt: 10 s to 10 min
     val liveDetect = MutableStateFlow(sp.getBoolean("live", false))          // instant detection needs a status notification
     val lastScan = MutableStateFlow(sp.getLong("lastscan", 0L))
@@ -115,13 +116,36 @@ class AppPrefs private constructor(c: Context) {
     val notifiedTag = MutableStateFlow(sp.getString("notifiedtag", "") ?: "")
 
     /** Per-install random secret used to verify internal notification PendingIntents arriving at exported MainActivity. */
-    val intentToken: String by lazy {
-        sp.getString("intent_token", null)?.takeIf { it.length >= 32 } ?: run {
-            val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
-            val tok = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            sp.edit().putString("intent_token", tok).apply()
-            tok
+    @Volatile private var intentTokenCache: String? = null
+    val intentToken: String
+        get() = intentTokenCache ?: synchronized(this) {
+            intentTokenCache ?: loadOrCreateIntentToken().also { intentTokenCache = it }
         }
+
+    private fun loadOrCreateIntentToken(): String {
+        val iv = sp.getString("it_iv", null)
+        val ct = sp.getString("it_ct", null)
+        if (iv != null && ct != null) {
+            LocalKeyWrap.decrypt(iv, ct)?.takeIf { it.length >= 32 }?.let { return it }
+        }
+        val legacy = sp.getString("intent_token", null)?.takeIf { it.length >= 32 }
+        val fresh = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val tok = legacy ?: Base64.encodeToString(fresh, Base64.NO_WRAP)
+        storeIntentToken(tok)
+        return tok
+    }
+
+    private fun storeIntentToken(tok: String) {
+        val (iv, ct) = LocalKeyWrap.encrypt(tok)
+        sp.edit().putString("it_iv", iv).putString("it_ct", ct).remove("intent_token").apply()
+    }
+
+    /** Rotating invalidates every previously issued privileged PendingIntent. */
+    fun rotateIntentToken() {
+        val fresh = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val tok = Base64.encodeToString(fresh, Base64.NO_WRAP)
+        storeIntentToken(tok)
+        intentTokenCache = tok
     }
 
     private fun load(): Map<String, Long> =
@@ -135,11 +159,34 @@ class AppPrefs private constructor(c: Context) {
     fun setQuickAdd(v: Boolean) { quickAdd.value = v; sp.edit().putBoolean("quick", v).apply() }
     fun setHide(v: Boolean) { hideBalances.value = v; sp.edit().putBoolean("hide", v).apply() }
     fun setOnboarded(v: Boolean) { onboarded.value = v; sp.edit().putBoolean("onboarded", v).apply() }
-    fun setLock(v: Boolean) { lockEnabled.value = v; sp.edit().putBoolean("lock", v).apply() }
+    fun setLock(v: Boolean) {
+        if (v != lockEnabled.value) rotateIntentToken()
+        lockEnabled.value = v
+        sp.edit().putBoolean("lock", v).apply()
+    }
     fun setSecure(v: Boolean) { secure.value = v; sp.edit().putBoolean("secure", v).apply() }
     fun setHaptics(v: Boolean) { haptics.value = v; sp.edit().putBoolean("haptics", v).apply() }
     fun setAutoBackup(v: Boolean) { autoBackup.value = v; sp.edit().putBoolean("autobackup", v).apply() }
     fun setBackupUri(v: String) { backupUri.value = v; sp.edit().putString("backupuri", v).apply() }
+
+    private fun loadBackupFiles(): Set<String> =
+        (sp.getString("backupfiles", "") ?: "").split(';').filter { it.startsWith("content://") }.toSet()
+
+    /** Track only files this app wrote, so pruning never touches unrelated user files. */
+    fun addBackupFile(uri: String) {
+        backupFiles.value = (backupFiles.value + uri).takeLast(8).toSet()
+        sp.edit().putString("backupfiles", backupFiles.value.joinToString(";")).apply()
+    }
+
+    /** Returns tracked URIs beyond the newest 8 and forgets them. */
+    fun pruneBackupFiles(): Set<String> {
+        val keep = backupFiles.value.takeLast(8).toSet()
+        val removed = backupFiles.value - keep
+        backupFiles.value = keep
+        sp.edit().putString("backupfiles", keep.joinToString(";")).apply()
+        return removed
+    }
+
     fun setBackupPassphrase(passphrase: String): Boolean {
         val trimmed = passphrase.trim()
         if (trimmed.isEmpty()) {

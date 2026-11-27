@@ -147,7 +147,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val draft = MutableStateFlow<Draft?>(null)
     val locked = MutableStateFlow(false)
     val settingsTarget = MutableStateFlow<String?>(null)
-    var stoppedAt = 0L
 
     init { materialize() }
 
