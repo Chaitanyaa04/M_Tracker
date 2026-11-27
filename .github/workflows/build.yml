@@ -53,12 +53,15 @@ jobs:
             MI="${BASH_REMATCH[2]}"
             PA="${BASH_REMATCH[3]}"
             V="${MA}.${MI}.${PA}"
-            VC=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
+            # Larger base keeps future stable tags installable over dev builds,
+            # whose version codes grow with the GitHub run number.
+            VC=$(( 10#$MA * 1000000 + 10#$MI * 10000 + 10#$PA ))
           else
-            # Dev releases must sort above the currently installed 1.2.0, but
-            # below the first stable release (use v1.3.0+ when switching back).
-            V="1.2.${RUN_NUM}"
-            VC=$(( 10000 + 200 + 10#$RUN_NUM ))
+            # Dev releases must sort above the first stable v1.3.0 so the app
+            # notifies testers. Use v1.4.0+ for the next stable tag because dev
+            # patch numbers are GitHub run numbers and are much higher.
+            V="1.3.${RUN_NUM}"
+            VC=$(( 10000 + 300 + 10#$RUN_NUM ))
           fi
           echo "name=$V" >> "$GITHUB_OUTPUT"
           echo "code=$VC" >> "$GITHUB_OUTPUT"
