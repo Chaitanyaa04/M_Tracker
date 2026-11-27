@@ -47,6 +47,8 @@ object BackupManager {
     suspend fun restore(db: AppDatabase, json: String): Int = withContext(Dispatchers.IO) {
         val o = JSONObject(json)
         require(o.optString("app") in listOf("Arthak", "M_Tracker"))
+        // Sanity-check the whole file BEFORE touching the database: a malformed or truncated
+        // backup must fail here, not after the live data has already been cleared.
         fun JSONObject.toOrNull(k: String): Long? = if (isNull(k)) null else getLong(k)
         val accs = o.getJSONArray("accounts").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map { Account(it.getLong("id"), it.getString("name"), it.getString("type"), it.getDouble("opening"), it.optInt("color", 0)) } }
         val txns = o.getJSONArray("transactions").let { a -> (0 until a.length()).map { a.getJSONObject(it) }.map {
@@ -62,6 +64,7 @@ object BackupManager {
                 it.getString("category"), it.getLong("account"), it.toOrNull("to"), it.getString("tag"), it.getBoolean("exclude"),
                 it.getString("freq"), it.getLong("nextDue"))
         } }
+        require(accs.isNotEmpty()) { "Backup contains no accounts." }
         val d = db.dao()
         db.withTransaction {
             d.clearTxns(); d.clearPersons(); d.clearRecurring(); d.clearAccounts(); d.clearBudgets(); d.clearCategories()
