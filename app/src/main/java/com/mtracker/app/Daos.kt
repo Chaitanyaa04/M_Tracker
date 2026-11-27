@@ -87,9 +87,6 @@ interface LedgerDao {
     @Query("UPDATE transactions SET personId = 0, owed = 0 WHERE personId = :id") suspend fun detachPerson(id: Long)
     @Query("DELETE FROM persons") suspend fun clearPersons()
 
-    // de-duplication of payment prompts
-    @Query("SELECT COUNT(*) FROM pending WHERE pkg = :pkg AND time > :since") suspend fun countRecent(pkg: String, since: Long): Int
-
     @Update suspend fun updatePerson(p: Person)
     @Query("SELECT * FROM transactions WHERE accountId = :id AND type = 'EXPENSE' ORDER BY createdAt DESC, id DESC LIMIT 1")
     suspend fun lastExpenseFor(id: Long): Txn?

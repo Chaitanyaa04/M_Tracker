@@ -104,8 +104,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** personId -> balance. Positive = they owe you, negative = you owe them. */
     val personBalances = txns.map { l -> l.filter { it.personId != 0L }.groupBy { it.personId }.mapValues { e -> e.value.sumOf { it.owed } } }.eager(emptyMap())
 
-    val expenseCats = categories.map { l -> l.filter { it.kind == "EXPENSE" }.map { it.name } }.eager(DEFAULT_EXPENSE_CATEGORIES)
-    val incomeCats = categories.map { l -> l.filter { it.kind == "INCOME" }.map { it.name } }.eager(DEFAULT_INCOME_CATEGORIES)
     val balances = combine(txns, accounts) { t, a -> computeBalances(t, a) }.eager(emptyMap())
     val streak = combine(txns, dayMarks) { t, m -> computeStreak(t, m) }.eager(0 to false)
 

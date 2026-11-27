@@ -95,7 +95,6 @@ class AppPrefs private constructor(c: Context) {
     val delaySec = MutableStateFlow(sp.getInt("delay", 30))
     val apps = MutableStateFlow(load())
     val checkinHour = MutableStateFlow(sp.getInt("checkin", 21))                   // -1 = off
-    val quickAdd = MutableStateFlow(sp.getBoolean("quick", false))
     val hideBalances = MutableStateFlow(sp.getBoolean("hide", false))
     val onboarded = MutableStateFlow(sp.getBoolean("onboarded", false))
     val lockEnabled = MutableStateFlow(sp.getBoolean("lock", false))
@@ -156,7 +155,6 @@ class AppPrefs private constructor(c: Context) {
     fun setMode(v: String) { mode.value = v; sp.edit().putString("mode", v).apply() }
     fun setDelay(v: Int) { delaySec.value = v; sp.edit().putInt("delay", v).apply() }
     fun setCheckin(v: Int) { checkinHour.value = v; sp.edit().putInt("checkin", v).apply() }
-    fun setQuickAdd(v: Boolean) { quickAdd.value = v; sp.edit().putBoolean("quick", v).apply() }
     fun setHide(v: Boolean) { hideBalances.value = v; sp.edit().putBoolean("hide", v).apply() }
     fun setOnboarded(v: Boolean) { onboarded.value = v; sp.edit().putBoolean("onboarded", v).apply() }
     fun setLock(v: Boolean) {
@@ -249,7 +247,6 @@ object Cooldown {
         m[pkg] = now
         return true
     }
-    fun reset(pkg: String) { m.remove(pkg) }
 }
 
 object Perms {
