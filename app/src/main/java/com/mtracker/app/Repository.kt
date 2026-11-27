@@ -87,7 +87,7 @@ class Repository(private val db: AppDatabase) {
     private fun safeTextCell(s: String): String {
         // Skip leading whitespace and Unicode format chars (BOM, zero-width, etc.)
         // so `=`, `+`, `-`, `@`, tab or CR can't hide behind them in spreadsheets.
-        val first = s.firstOrNull { ch -> Character.getType(ch) != Character.FORMAT && !ch.isWhitespace() }
+        val first = s.firstOrNull { ch -> Character.getType(ch) != Character.FORMAT.toInt() && !ch.isWhitespace() }
         val guarded = if (first != null && first in formulaTriggers) "'$s" else s
         return q(guarded)
     }

@@ -174,16 +174,16 @@ class AppPrefs private constructor(c: Context) {
 
     /** Track only files this app wrote, so pruning never touches unrelated user files. */
     fun addBackupFile(uri: String) {
-        backupFiles.value = (backupFiles.value + uri).takeLast(8).toSet()
-        sp.edit().putString("backupfiles", backupFiles.value.joinToString(";")).apply()
+        backupFiles.value = (backupFiles.value + uri).toList().takeLast(8).toSet()
+        sp.edit().putString("backupfiles", backupFiles.value.joinToString(separator = ";")).apply()
     }
 
     /** Returns tracked URIs beyond the newest 8 and forgets them. */
     fun pruneBackupFiles(): Set<String> {
-        val keep = backupFiles.value.takeLast(8).toSet()
+        val keep = backupFiles.value.toList().takeLast(8).toSet()
         val removed = backupFiles.value - keep
         backupFiles.value = keep
-        sp.edit().putString("backupfiles", keep.joinToString(";")).apply()
+        sp.edit().putString("backupfiles", keep.joinToString(separator = ";")).apply()
         return removed
     }
 
