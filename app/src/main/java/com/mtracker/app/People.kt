@@ -274,7 +274,9 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                             t.note.isNotBlank() -> " · ${t.note}"
                             else -> ""
                         }
-                        Row(Modifier.fillMaxWidth().padding(18.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(18.dp, 12.dp)
+                            .clickable(onClick = { if (!t.type.startsWith("PERSON")) vm.edit(t) }),
+                            verticalAlignment = Alignment.CenterVertically) {
                             if (t.type == "EXPENSE") HeadTile(t.category, 40.dp) else HeadTile("People", 40.dp, stored = "person")
                             Spacer(Modifier.width(14.dp))
                             Column(Modifier.weight(1f)) {
@@ -306,12 +308,14 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     if (deletePersonId != 0L) {
         val target = people.firstOrNull { it.id == deletePersonId }
         val tripCount = tripDebts.count { it.fromPersonId == deletePersonId || it.toPersonId == deletePersonId }
+        val groupCount = groupDebts.count { it.fromPersonId == deletePersonId || it.toPersonId == deletePersonId }
+        val debtCount = tripCount + groupCount
         AlertDialog(
             onDismissRequest = { deletePersonId = 0L }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
             title = { Cap("Remove ${target?.name ?: "person"}?", color = L.text) },
             text = {
                 Text("Their entries stay in your ledger but lose the person label. " +
-                    (if (tripCount > 0) "This also erases $tripCount trip debt(s). This cannot be undone."
+                    (if (debtCount > 0) "This also erases $debtCount trip/group debt(s), including ones between other people. This cannot be undone."
                     else "This cannot be undone."),
                     color = L.muted, fontSize = 13.sp, lineHeight = 18.sp)
             },
@@ -470,7 +474,7 @@ fun PersonDialog(person: Person?, canRemove: Boolean, onDismiss: () -> Unit, onS
                     }
                 }
                 if (photoError.isNotBlank()) Text(photoError, color = L.red, fontSize = 12.sp)
-                Field("Name", name, { name = it })
+                Field("Name", name, { name = it.take(100) })
                 Cap("Relation")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("Family", "Friend", "Colleague", "Other").forEach { r -> Chip(r, relation == r) { relation = if (relation == r) "" else r } }

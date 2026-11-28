@@ -151,7 +151,8 @@ fun LedgerScreen(
             item(key = "g$date") {
                 Panel(Modifier.padding(horizontal = 16.dp)) {
                     list.forEachIndexed { i, t ->
-                        TxnRow(t, names, people, tripNames, onClick = { if (!t.type.startsWith("PERSON")) vm.edit(t) }, onDelete = { onDelete(t) }, divider = i < list.lastIndex)
+                        TxnRow(t, names, people, tripNames, onClick = { if (!t.type.startsWith("PERSON")) vm.edit(t) },
+                            onDelete = { onDelete(t) }, canDelete = !t.type.startsWith("PERSON"), divider = i < list.lastIndex)
                     }
                 }
             }
@@ -205,13 +206,14 @@ fun StatusPill(s: DetectStatus, onClick: () -> Unit) {
 @Composable
 fun TxnRow(
     t: Txn, names: Map<Long, String>, people: Map<Long, String>, tripNames: Map<Long, String>, onClick: () -> Unit, onDelete: () -> Unit,
-    modifier: Modifier = Modifier, divider: Boolean = true
+    modifier: Modifier = Modifier, divider: Boolean = true, canDelete: Boolean = true
 ) {
     val state = rememberSwipeToDismissBoxState(confirmValueChange = {
-        if (it == SwipeToDismissBoxValue.EndToStart) { onDelete(); true } else false
+        if (canDelete && it == SwipeToDismissBoxValue.EndToStart) { onDelete(); true } else false
     })
     SwipeToDismissBox(
         state = state, modifier = modifier, enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = canDelete,
         backgroundContent = {
             Box(Modifier.fillMaxSize().background(L.red.copy(alpha = 0.15f)).padding(end = 24.dp), contentAlignment = Alignment.CenterEnd) {
                 Cap("Delete", color = L.red)

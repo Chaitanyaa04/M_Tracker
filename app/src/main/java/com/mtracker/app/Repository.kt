@@ -65,6 +65,10 @@ class Repository(private val db: AppDatabase) {
         }
     }
 
+    /** A recycled row restored after its person was removed must not create a balance no tile can settle. */
+    private suspend fun Txn.withoutMissingPerson(): Txn =
+        if (personId != 0L && d.personById(personId) == null) copy(personId = 0L) else this
+
     /** Only split-generated expense rows are baked into Trip.spent; keep that counter in sync. */
     private suspend fun adjustTripSpent(t: Txn, delta: Double) {
         if (t.tripId == 0L || t.type != "EXPENSE" || t.tag != "trip") return
@@ -91,11 +95,12 @@ class Repository(private val db: AppDatabase) {
 
     /** Undo after a swipe-delete: put the row back and clear its Recycle Bin entry. */
     suspend fun restore(t: Txn) = db.withTransaction {
-        ensureAccount(t.accountId)
-        t.toAccountId?.let { ensureAccount(it) }
+        val row = t.withoutMissingPerson()
+        ensureAccount(row.accountId)
+        row.toAccountId?.let { ensureAccount(it) }
         d.deleteDeletedTxn(t.id)
-        d.insert(t)
-        adjustTripSpent(t, t.amount)
+        d.insert(row)
+        adjustTripSpent(row, row.amount)
     }
 
     suspend fun delete(t: Txn) = db.withTransaction {
@@ -106,7 +111,7 @@ class Repository(private val db: AppDatabase) {
     }
 
     suspend fun restoreDeleted(item: DeletedTxn) = db.withTransaction {
-        val t = item.asTxn()
+        val t = item.asTxn().withoutMissingPerson()
         ensureAccount(t.accountId)
         t.toAccountId?.let { ensureAccount(it) }
         d.insert(t)
@@ -189,7 +194,13 @@ class Repository(private val db: AppDatabase) {
     suspend fun addCategory(name: String, kind: String, icon: String = "") = d.insertCategory(Category(name.trim(), kind, icon))
     suspend fun deleteCategory(name: String, kind: String) = d.deleteCategory(name, kind)
     suspend fun markNoSpend(day: Long) = d.insertMark(DayMark(day))
-    suspend fun addPerson(name: String): Long = d.insertPerson(Person(name = name.trim()))
+    suspend fun addPerson(name: String): Long = db.withTransaction {
+        val clean = PeopleMath.name(name)
+        require(clean.isNotBlank()) { "Name is required." }
+        val id = d.insertPerson(Person(name = clean))
+        record("PERSON", id, "CREATE", JSONObject().put("name", clean).toString())
+        id
+    }
     suspend fun personById(id: Long): Person? = d.personById(id)
 
     suspend fun deletePerson(id: Long) = db.withTransaction {
@@ -200,12 +211,29 @@ class Repository(private val db: AppDatabase) {
             record("TXN", t.id, "PERSON_DETACH", t.asJson().toString())
         }
         d.detachPerson(id)
+        d.detachDeletedPerson(id)
         d.deleteGroupMembersOfPerson(id); d.deleteGroupDebtsOfPerson(id)
         d.deleteTripMembersOfPerson(id); d.deleteTripDebtsOfPerson(id)
         d.deletePerson(id)
     }
     suspend fun addTxn(t: Txn) { save(t) }
-    suspend fun savePerson(p: Person): Long = if (p.id == 0L) d.insertPerson(p) else { d.updatePerson(p); p.id }
+    suspend fun savePerson(p: Person): Long = db.withTransaction {
+        val clean = PeopleMath.name(p.name)
+        require(clean.isNotBlank()) { "Name is required." }
+        val row = p.copy(
+            name = clean, relation = p.relation.trim().take(50),
+            phone = p.phone.trim().take(24), note = p.note.trim().take(300)
+        )
+        if (p.id == 0L) {
+            val id = d.insertPerson(row)
+            record("PERSON", id, "CREATE", JSONObject().put("name", clean).toString())
+            id
+        } else {
+            d.updatePerson(row)
+            record("PERSON", p.id, "EDIT", JSONObject().put("name", clean).toString())
+            p.id
+        }
+    }
 
     /** Splits whole rupees into paise so the saved shares always add back to the exact bill. */
     private fun splitCents(totalCents: Long, parts: List<Pair<Long, Double>>): Map<Long, Long> {

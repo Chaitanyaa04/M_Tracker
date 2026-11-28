@@ -156,7 +156,7 @@ object BackupManager {
                     .put("trip", it.tripId))
             } })
             put("persons", JSONArray().also { a -> persons.forEach {
-                a.put(JSONObject().put("id", it.id).put("name", it.name).put("rel", it.relation).put("phone", it.phone)
+                a.put(JSONObject().put("id", it.id).put("name", PeopleMath.name(it.name)).put("rel", it.relation).put("phone", it.phone)
                     .put("note", it.note).put("photo", it.photoUri))
             } })
             put("budgets", JSONArray().also { a -> budgets.forEach { a.put(JSONObject().put("name", it.name).put("amount", it.amount)) } })

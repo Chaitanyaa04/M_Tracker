@@ -221,7 +221,9 @@ fun TripsView(vm: MainViewModel, modifier: Modifier = Modifier) {
             if (txnsHere.isEmpty()) item {
                 Text("Nothing linked yet.", color = L.muted, fontSize = 13.sp, modifier = Modifier.padding(24.dp, 4.dp))
             } else items(txnsHere, key = { it.id }) { x ->
-                Row(Modifier.fillMaxWidth().padding(24.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(24.dp, 8.dp)
+                    .clickable(onClick = { if (!x.type.startsWith("PERSON")) vm.edit(x) }),
+                    verticalAlignment = Alignment.CenterVertically) {
                     HeadTile(x.category, 38.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {

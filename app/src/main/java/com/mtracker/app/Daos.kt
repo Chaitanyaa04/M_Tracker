@@ -117,7 +117,8 @@ interface LedgerDao {
     @Query("SELECT * FROM persons WHERE id = :id") suspend fun personById(id: Long): Person?
     @Insert suspend fun insertPerson(p: Person): Long
     @Query("DELETE FROM persons WHERE id = :id") suspend fun deletePerson(id: Long)
-    @Query("UPDATE transactions SET personId = 0, owed = 0 WHERE personId = :id") suspend fun detachPerson(id: Long)
+    @Query("UPDATE transactions SET personId = 0 WHERE personId = :id") suspend fun detachPerson(id: Long)
+    @Query("UPDATE deleted_txns SET personId = 0 WHERE personId = :id") suspend fun detachDeletedPerson(id: Long)
     @Query("DELETE FROM persons") suspend fun clearPersons()
 
     @Update suspend fun updatePerson(p: Person)

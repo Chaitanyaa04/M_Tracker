@@ -267,6 +267,15 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val target by vm.settingsTarget.collectAsState()
     LaunchedEffect(target) { target?.let { settingsStart = it; showSettings = true; vm.settingsTarget.value = null } }
 
+    fun deleteTxn(tx: Txn) {
+        vm.delete(tx)
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val r = snackbar.showSnackbar("Transaction deleted", "Undo", duration = SnackbarDuration.Short)
+            if (r == SnackbarResult.ActionPerformed) vm.restore(tx)
+        }
+    }
+
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         tick++
         MonitorController.sync(ctx); CheckinScheduler.sync(ctx); BackupScheduler.sync(ctx); UpdateScheduler.sync(ctx)
@@ -340,14 +349,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
                                     Intent(if (mode == "A") Settings.ACTION_USAGE_ACCESS_SETTINGS else Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                                 ) else showSettings = true
                             },
-                            onDelete = { tx ->
-                                vm.delete(tx)
-                                scope.launch {
-                                    snackbar.currentSnackbarData?.dismiss()
-                                    val r = snackbar.showSnackbar("Transaction deleted", "Undo", duration = SnackbarDuration.Short)
-                                    if (r == SnackbarResult.ActionPerformed) vm.restore(tx)
-                                }
-                            },
+                            onDelete = { tx -> deleteTxn(tx) },
                             onPending = { p, a -> if (a == "DISMISS") vm.dismissPending(p) else vm.fromPending(p, a) }
                         )
                         1 -> AccountsScreen(vm, onTransfer = { vm.newDraft("TRANSFER") })
@@ -367,6 +369,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
                 lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },
                 onAddPerson = { n, cb -> vm.addPerson(n, cb) },
                 onAddHead = { n, k, ic -> vm.addHead(n, k, ic) },
+                onDelete = { tx -> deleteTxn(tx) },
                 onDismiss = { vm.draft.value = null },
                 onSave = { t, r -> vm.save(t, r, d.pendingId) }
             )

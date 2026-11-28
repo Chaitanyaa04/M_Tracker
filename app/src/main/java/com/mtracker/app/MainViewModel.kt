@@ -58,7 +58,8 @@ data class Draft(
     val split: String = "TAG",
     val share: String = "",
     val tripId: Long = 0,
-    val createdAt: Long = 0
+    val createdAt: Long = 0,
+    val original: Txn? = null
 )
 
 fun computeBalances(t: List<Txn>, a: List<Account>): Map<Long, Double> = LedgerMath.balances(t, a)
@@ -100,7 +101,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val tripDebts = repo.tripDebts.eager(emptyList())
     val peopleNames = persons.map { l -> l.associate { it.id to it.name } }.eager(emptyMap())
     /** personId -> balance. Positive = they owe you, negative = you owe them. */
-    val personBalances = txns.map { l -> l.filter { it.personId != 0L }.groupBy { it.personId }.mapValues { e -> e.value.sumOf { it.owed } } }.eager(emptyMap())
+    val personBalances = txns.map { l -> PeopleMath.balances(l) }.eager(emptyMap())
 
     val balances = combine(txns, accounts) { t, a -> computeBalances(t, a) }.eager(emptyMap())
     val streak = combine(txns, dayMarks) { t, m -> computeStreak(t, m) }.eager(0 to false)
@@ -172,7 +173,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             routeFrom = t.routeFrom, routeTo = t.routeTo, items = t.items, personId = t.personId,
             split = if (t.personId == 0L || t.owed == 0.0) "TAG" else if (t.owed >= t.amount - 0.005) "FULL" else "SPLIT",
             share = if (t.owed > 0) fmtAmt(t.owed) else "",
-            tripId = t.tripId, createdAt = t.createdAt
+            tripId = t.tripId, createdAt = t.createdAt, original = t
         )
     }
 

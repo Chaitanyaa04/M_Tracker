@@ -241,13 +241,17 @@ fun PeriodSheet(label: String, from: Long, to: Long, vm: MainViewModel, onDismis
         Hairline()
         LazyColumn(Modifier.heightIn(max = 520.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
             if (list.isEmpty()) item { Text("Nothing logged.", color = L.muted, fontSize = 14.sp, modifier = Modifier.padding(24.dp)) }
-            items(list, key = { it.id }) { t -> PeriodLine(t, names, people) }
+            items(list, key = { it.id }) { t ->
+                PeriodLine(t, names, people, onClick = {
+                    if (!t.type.startsWith("PERSON")) { onDismiss(); vm.edit(t) }
+                })
+            }
         }
     }
 }
 
 @Composable
-private fun PeriodLine(t: Txn, names: Map<Long, String>, people: Map<Long, String>) {
+private fun PeriodLine(t: Txn, names: Map<Long, String>, people: Map<Long, String>, onClick: () -> Unit) {
     val who = people[t.personId]
     val title = when (t.type) {
         "TRANSFER" -> "Transfer"
@@ -261,7 +265,7 @@ private fun PeriodLine(t: Txn, names: Map<Long, String>, people: Map<Long, Strin
         if (t.type.startsWith("PERSON") || t.type == "TRANSFER") null else t.category, names[t.accountId]
     ).joinToString(" · ")
     Column {
-        Row(Modifier.fillMaxWidth().padding(24.dp, 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(24.dp, 12.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
             when {
                 t.type == "TRANSFER" -> HeadTile("Transfer", 40.dp, stored = "swap")
                 t.type.startsWith("PERSON") -> HeadTile(who ?: "People", 40.dp, stored = "person")

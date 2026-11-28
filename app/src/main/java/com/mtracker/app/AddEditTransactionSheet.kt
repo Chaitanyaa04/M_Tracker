@@ -13,6 +13,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Receipt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -156,7 +157,7 @@ fun AddEditTransactionSheet(
     recents: List<Txn>, merchantNames: List<String>, lookup: (String) -> Txn?,
     people: List<Person>, trips: List<Trip>, lastTrip: () -> Txn?, places: () -> List<String>, routes: () -> List<Pair<String, String>>,
     onAddPerson: (String, (Long) -> Unit) -> Unit,
-    onAddHead: (String, String, String) -> Unit, onDismiss: () -> Unit, onSave: (Txn, String) -> Unit
+    onAddHead: (String, String, String) -> Unit, onDelete: (Txn) -> Unit, onDismiss: () -> Unit, onSave: (Txn, String) -> Unit
 ) {
     val isNew = d.id == 0L
     var type by remember { mutableStateOf(d.type) }
@@ -259,6 +260,14 @@ fun AddEditTransactionSheet(
                 .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            if (!isNew && d.original != null) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = {
+                        d.original?.let(onDelete)
+                        onDismiss()
+                    }) { Icon(Icons.Rounded.Delete, contentDescription = "Delete transaction", tint = L.red) }
+                }
+            }
             // ---- what kind of entry: plain words, no + / − guessing
             val shape = RoundedCornerShape(16.dp)
             Row(Modifier.fillMaxWidth().clip(shape).background(L.bg).border(1.dp, L.border, shape).padding(4.dp)) {
@@ -464,8 +473,11 @@ fun AddEditTransactionSheet(
                     accId == 0L -> error = "Pick an account"
                     type == "TRANSFER" && (toId == 0L || toId == accId) -> error = "Pick two different accounts"
                     else -> {
-                        val owed = if (type == "EXPENSE" && personId != 0L) when (split) {
-                            "SPLIT" -> minOf(shareValue, v); "FULL" -> v; else -> 0.0
+                        val keptOwed = if (d.personId == 0L) d.share.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0 else 0.0
+                        val owed = if (type == "EXPENSE") {
+                            if (personId != 0L) when (split) {
+                                "SPLIT" -> minOf(shareValue, v); "FULL" -> v; else -> 0.0
+                            } else minOf(keptOwed, v)
                         } else 0.0
                         onSave(
                             Txn(
@@ -493,7 +505,7 @@ fun AddEditTransactionSheet(
         AlertDialog(
             onDismissRequest = { addingPerson = false }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
             title = { Cap("Add a person", color = L.text) },
-            text = { Field("Name", nm, { nm = it }) },
+            text = { Field("Name", nm, { nm = it.take(100) }) },
             confirmButton = { TextButton({ if (nm.isNotBlank()) { onAddPerson(nm.trim()) { id -> personId = id; split = "TAG" }; addingPerson = false } }) { Text("Add") } },
             dismissButton = { TextButton({ addingPerson = false }) { Text("Cancel") } }
         )
