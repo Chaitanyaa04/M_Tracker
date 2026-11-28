@@ -27,7 +27,7 @@ import kotlin.math.min
 fun MonthPlan(vm: MainViewModel, modifier: Modifier = Modifier) {
     val txns by vm.txns.collectAsState()
     val budgets by vm.budgets.collectAsState()
-    val heads by vm.categories.collectAsState()
+    val heads by vm.visibleCategories.collectAsState()
     val usage by vm.usage.collectAsState()
     var edit by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }
@@ -140,7 +140,7 @@ fun PlanScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
 fun DayPlan(vm: MainViewModel, modifier: Modifier = Modifier) {
     val txns by vm.txns.collectAsState()
     val budgets by vm.budgets.collectAsState()
-    val heads by vm.categories.collectAsState()
+    val heads by vm.visibleCategories.collectAsState()
     val usage by vm.usage.collectAsState()
     var edit by remember { mutableStateOf<String?>(null) }
     var picking by remember { mutableStateOf(false) }

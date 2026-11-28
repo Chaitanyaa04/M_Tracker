@@ -1,6 +1,6 @@
 # Arthak roadmap
 
-Status as of 2026-11-28, commit `fb2a23a`, dev release `dev-1.3.33`.
+Status as of 2026-11-28; last shipped dev release `dev-1.3.35` (commit `71a0e4e`).
 
 ## Shipped
 
@@ -11,21 +11,21 @@ Status as of 2026-11-28, commit `fb2a23a`, dev release `dev-1.3.33`.
 - Trips: members, expenses, debts, settlements, archive and permanent delete.
 - Transactions open from the ledger, person history, Insights period sheet, and trip expense list; the opened sheet has a delete icon, and swipe-to-delete stays active for ordinary rows.
 - Core hardening: person removal detaches without erasing `owed`, names are backup-safe, orphan IDs cannot be restored, `PERSON_*` settlement rows are protected from swipe and account archival.
+- Heads: drag ordering, hide, rename and re-icon; hidden heads leave pickers but stay in history. Theme chips scroll so the System option is never clipped.
 - Release gate: unit tests → signed build → `apksigner` verification → publish. Stable tags must be `v1.4.0+`.
 
 ## Next — take one small batch at a time
 
-1. Heads: drag ordering, hide, rename, re-icon.
-2. Bottom tabs: rename, re-icon, reorder.
-3. Ledger: day / month toggle with concise calendar icons and date / day display choices.
-4. Budgets: per-head monthly → daily cap, custom day budget, per-head toggle, master switch.
-5. Itemized bills: taxes / discount under a `…` overflow.
-6. Account add / edit overflow `…` for a calmer screen.
-7. Repeats: custom date via small calendar / rule chips.
-8. Item-wise quantity splits (e.g. 3 rotis and 2 naan assigned to different people).
-9. Group settings.
-10. App-specific PIN.
-11. Attachments.
+1. Bottom tabs: rename, re-icon, reorder.
+2. Ledger: day / month toggle with concise calendar icons and date / day display choices.
+3. Budgets: per-head monthly → daily cap, custom day budget, per-head toggle, master switch.
+4. Itemized bills: taxes / discount under a `…` overflow.
+5. Account add / edit overflow `…` for a calmer screen.
+6. Repeats: custom date via small calendar / rule chips.
+7. Item-wise quantity splits (e.g. 3 rotis and 2 naan assigned to different people).
+8. Group settings.
+9. App-specific PIN.
+10. Attachments.
 
 ## Hidden or deferred by design
 

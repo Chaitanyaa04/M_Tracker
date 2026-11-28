@@ -48,7 +48,7 @@ Afterwards, the app checks GitHub daily and on resume. It shows one notification
 
 ## Themes
 
-System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available in Settings. System dark uses Soft Dark; choose OLED Black for pure-black screens. The daily safe-to-spend card is off by default and can be enabled under Settings → Appearance.
+System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available in Settings. All four chips stay reachable on narrow screens; System dark uses Soft Dark, and OLED Black is pure black. The daily safe-to-spend card is off by default and can be enabled under Settings → Appearance.
 
 ## Data safety
 
@@ -56,6 +56,7 @@ System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available 
 - Deleted transactions go to a local Recycle Bin. Removing an account archives it and moves its ordinary transactions there, while settlement records stay so settled debts keep their money trail; restoring recreates a missing account if needed.
 - Settings → Change history shows a small local log of edits, deletions and restores.
 - Accounts support Bank, Cash, UPI, Wallet, Credit card and short custom types. Archived accounts are hidden from pickers but their past transactions are kept.
+- Heads can be reordered, hidden, renamed and re-iconed under Settings → Heads & icons. Hidden heads stay in past transactions but leave the pickers.
 
 ## Flavors
 

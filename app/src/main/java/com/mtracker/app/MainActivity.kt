@@ -256,7 +256,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val scope = rememberCoroutineScope()
     val draft by vm.draft.collectAsState()
     val accs by vm.accounts.collectAsState()
-    val heads by vm.categories.collectAsState()
+    val heads by vm.visibleCategories.collectAsState()
     val usage by vm.usage.collectAsState()
     val iconMap by vm.iconMap.collectAsState()
     val recents by vm.recents.collectAsState()

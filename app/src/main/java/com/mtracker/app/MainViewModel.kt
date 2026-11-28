@@ -89,6 +89,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val pending = repo.pending.eager(emptyList())
     val recurring = repo.recurring.eager(emptyList())
     val categories = repo.categories.eager(emptyList())
+    /** Hidden heads stay in history but never appear in pickers or the quick strip. */
+    val visibleCategories = categories.map { HeadsMath.visible(it) }.eager(emptyList())
     val dayMarks = repo.dayMarks.eager(emptyList())
     val persons = repo.persons.eager(emptyList())
     val deletedTxns = repo.deletedTxns.eager(emptyList())
@@ -121,7 +123,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val usage = txns.map { l ->
         l.filter { it.type != "TRANSFER" }.groupingBy { (if (it.type == "INCOME") "INCOME" else "EXPENSE") + "|" + it.category }.eachCount()
     }.eager(emptyMap())
-    val iconMap = categories.map { l -> l.filter { it.icon.isNotEmpty() }.associate { it.name to it.icon } }.eager(emptyMap())
+    /** Icons are keyed both by head name and by kind+name, so "Other" in two kinds stays distinct. */
+    val iconMap = categories.map { l ->
+        buildMap<String, String> {
+            l.forEach { c ->
+                if (c.icon.isEmpty()) return@forEach
+                put(c.name, c.icon)
+                put("${c.kind}|${c.name}", c.icon)
+            }
+        }
+    }.eager(emptyMap())
 
     /** Heads you tend to use around this hour of day (and weekday). Powers the "Likely right now" row. */
     fun likely(kind: String): List<String> {
@@ -209,8 +220,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteAccount(id: Long) = viewModelScope.launch { repo.deleteAccount(id) }
     fun setBudget(name: String, amount: Double) = viewModelScope.launch { repo.setBudget(name, amount) }
     fun addCategory(name: String, kind: String) = viewModelScope.launch { if (name.isNotBlank()) repo.addCategory(name, kind) }
-    fun addHead(name: String, kind: String, icon: String) = viewModelScope.launch { if (name.isNotBlank()) repo.addCategory(name, kind, icon) }
+    fun addHead(
+        name: String, kind: String, icon: String,
+        done: () -> Unit = {}, fail: (String) -> Unit = {}
+    ) = viewModelScope.launch {
+        runCatching { repo.addCategory(name, kind, icon) }
+            .onSuccess { done() }
+            .onFailure { fail(it.message ?: "Could not add the head.") }
+    }
     fun deleteCategory(name: String, kind: String) = viewModelScope.launch { repo.deleteCategory(name, kind) }
+
+    fun setHeadHidden(c: Category, hidden: Boolean, fail: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repo.setCategoryHidden(c.name, c.kind, hidden) }
+            .onFailure { fail(it.message ?: "Could not change that head.") }
+    }
+
+    fun setHeadIcon(c: Category, icon: String, fail: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repo.setCategoryIcon(c.name, c.kind, icon) }
+            .onFailure { fail(it.message ?: "Could not change the icon.") }
+    }
+
+    fun renameHead(c: Category, name: String, done: () -> Unit, fail: (String) -> Unit) = viewModelScope.launch {
+        runCatching { repo.renameCategory(c.name, c.kind, name) }
+            .onSuccess { done() }
+            .onFailure { fail(it.message ?: "Could not rename the head.") }
+    }
+
+    /** Reorder happens only inside one kind; a stale list is rejected by the repository. */
+    fun reorderHeads(kind: String, names: List<String>, fail: (String) -> Unit = {}) = viewModelScope.launch {
+        runCatching { repo.reorderCategories(kind, names) }
+            .onFailure { fail(it.message ?: "Could not reorder heads.") }
+    }
     fun deleteRecurring(id: Long) = viewModelScope.launch { repo.deleteRecurring(id) }
     fun markNoSpend() = viewModelScope.launch { repo.markNoSpend(today()) }
 

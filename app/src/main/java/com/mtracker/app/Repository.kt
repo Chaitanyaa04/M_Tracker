@@ -126,8 +126,12 @@ class Repository(private val db: AppDatabase) {
     }
 
     suspend fun seedDefaultHeads() {
-        DEFAULT_EXPENSE_CATEGORIES.forEach { d.insertCategory(Category(it, "EXPENSE", defaultHeadIcon(it, "EXPENSE"))) }
-        DEFAULT_INCOME_CATEGORIES.forEach { d.insertCategory(Category(it, "INCOME", defaultHeadIcon(it, "INCOME"))) }
+        DEFAULT_EXPENSE_CATEGORIES.forEachIndexed { i, it ->
+            d.insertCategory(Category(it, "EXPENSE", defaultHeadIcon(it, "EXPENSE"), i))
+        }
+        DEFAULT_INCOME_CATEGORIES.forEachIndexed { i, it ->
+            d.insertCategory(Category(it, "INCOME", defaultHeadIcon(it, "INCOME"), i))
+        }
     }
 
     suspend fun saveAccount(a: Account) = db.withTransaction {
@@ -191,8 +195,60 @@ class Repository(private val db: AppDatabase) {
 
     suspend fun deleteRecurring(id: Long) = d.deleteRecurring(id)
     suspend fun deletePending(id: Long) = d.deletePending(id)
-    suspend fun addCategory(name: String, kind: String, icon: String = "") = d.insertCategory(Category(name.trim(), kind, icon))
+    suspend fun addCategory(name: String, kind: String, icon: String = "") = db.withTransaction {
+        val clean = HeadsMath.cleanName(name)
+        require(clean.isNotBlank()) { "Name is required." }
+        require(kind in setOf("EXPENSE", "INCOME")) { "Invalid head type." }
+        require(icon.isEmpty() || icon in HEAD_ICON_MAP) { "Unknown icon." }
+        require(d.categoryByName(clean, kind) == null) { "A head with that name already exists." }
+        val next = d.allCategories().filter { it.kind == kind }.maxOfOrNull { it.sortOrder }?.plus(1) ?: 0
+        d.insertCategory(Category(clean, kind, icon, next))
+    }
+
     suspend fun deleteCategory(name: String, kind: String) = d.deleteCategory(name, kind)
+
+    /** Hidden heads stay in old transactions but leave pickers and the quick strip. */
+    suspend fun setCategoryHidden(name: String, kind: String, hidden: Boolean) = db.withTransaction {
+        require(d.categoryByName(name, kind) != null) { "Head not found." }
+        d.setCategoryHidden(name, kind, hidden)
+    }
+
+    suspend fun setCategoryIcon(name: String, kind: String, icon: String) = db.withTransaction {
+        require(d.categoryByName(name, kind) != null) { "Head not found." }
+        require(icon.isEmpty() || icon in HEAD_ICON_MAP) { "Unknown icon." }
+        d.setCategoryIcon(name, kind, icon)
+    }
+
+    /** Order is per kind. A stale or partial list is rejected instead of silently reordering. */
+    suspend fun reorderCategories(kind: String, names: List<String>) = db.withTransaction {
+        require(kind in setOf("EXPENSE", "INCOME")) { "Invalid head type." }
+        val existing = d.allCategories().filter { it.kind == kind }.map { it.name }.toSet()
+        require(names.size == existing.size && names.toSet() == existing) { "Head list is out of date." }
+        names.forEachIndexed { i, n -> d.setCategoryOrder(n, kind, i) }
+    }
+
+    /** Renaming keeps past transactions, recycled rows, repeats and budgets pointing at the new name. */
+    suspend fun renameCategory(name: String, kind: String, raw: String) = db.withTransaction {
+        val clean = HeadsMath.cleanName(raw)
+        require(clean.isNotBlank()) { "Name is required." }
+        require(clean != name) { "Choose a different name." }
+        require(d.categoryByName(name, kind) != null) { "Head not found." }
+        require(d.categoryByName(clean, kind) == null) { "A head with that name already exists." }
+        val budgets = d.allBudgets().filter { it.name == name || it.name == DAY_PREFIX + name }
+        budgets.forEach { b ->
+            val next = if (b.name == name) clean else DAY_PREFIX + clean
+            require(d.allBudgets().none { it.name == next }) { "A budget with that name already exists." }
+        }
+        d.renameCategoryRow(name, kind, clean)
+        d.renameTxnCategory(name, kind, clean)
+        d.renameDeletedTxnCategory(name, kind, clean)
+        d.renameRecurringCategory(name, kind, clean)
+        budgets.forEach { b ->
+            d.deleteBudget(b.name)
+            d.upsertBudget(b.copy(name = if (b.name == name) clean else DAY_PREFIX + clean))
+        }
+        record("HEAD", 0L, "RENAME", JSONObject().put("kind", kind).put("from", name).put("to", clean).toString())
+    }
     suspend fun markNoSpend(day: Long) = d.insertMark(DayMark(day))
     suspend fun addPerson(name: String): Long = db.withTransaction {
         val clean = PeopleMath.name(name)

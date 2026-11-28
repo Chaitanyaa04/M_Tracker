@@ -87,9 +87,17 @@ interface LedgerDao {
     @Query("DELETE FROM recurring WHERE accountId = :id OR toAccountId = :id") suspend fun deleteRecurringOfAccount(id: Long)
 
     // categories
-    @Query("SELECT * FROM categories ORDER BY kind, name COLLATE NOCASE") fun categories(): Flow<List<Category>>
+    @Query("SELECT * FROM categories ORDER BY kind, sortOrder, name COLLATE NOCASE") fun categories(): Flow<List<Category>>
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertCategory(c: Category)
     @Query("DELETE FROM categories WHERE name = :name AND kind = :kind") suspend fun deleteCategory(name: String, kind: String)
+    @Query("SELECT * FROM categories WHERE name = :name AND kind = :kind") suspend fun categoryByName(name: String, kind: String): Category?
+    @Query("UPDATE categories SET sortOrder = :pos WHERE name = :name AND kind = :kind") suspend fun setCategoryOrder(name: String, kind: String, pos: Int): Int
+    @Query("UPDATE categories SET hidden = :hidden WHERE name = :name AND kind = :kind") suspend fun setCategoryHidden(name: String, kind: String, hidden: Boolean): Int
+    @Query("UPDATE categories SET icon = :icon WHERE name = :name AND kind = :kind") suspend fun setCategoryIcon(name: String, kind: String, icon: String): Int
+    @Query("UPDATE categories SET name = :newName WHERE name = :oldName AND kind = :kind") suspend fun renameCategoryRow(oldName: String, kind: String, newName: String): Int
+    @Query("UPDATE transactions SET category = :newName WHERE category = :oldName AND type = :kind") suspend fun renameTxnCategory(oldName: String, kind: String, newName: String): Int
+    @Query("UPDATE deleted_txns SET category = :newName WHERE category = :oldName AND type = :kind") suspend fun renameDeletedTxnCategory(oldName: String, kind: String, newName: String): Int
+    @Query("UPDATE recurring SET category = :newName WHERE category = :oldName AND type = :kind") suspend fun renameRecurringCategory(oldName: String, kind: String, newName: String): Int
 
     // streak helpers
     @Query("SELECT * FROM daymarks") fun dayMarks(): Flow<List<DayMark>>
@@ -100,7 +108,7 @@ interface LedgerDao {
 
     // backup / restore
     @Query("SELECT * FROM budgets") suspend fun allBudgets(): List<Budget>
-    @Query("SELECT * FROM categories") suspend fun allCategories(): List<Category>
+    @Query("SELECT * FROM categories ORDER BY kind, sortOrder, name COLLATE NOCASE") suspend fun allCategories(): List<Category>
     @Query("DELETE FROM transactions") suspend fun clearTxns()
     @Query("DELETE FROM accounts") suspend fun clearAccounts()
     @Query("DELETE FROM budgets") suspend fun clearBudgets()

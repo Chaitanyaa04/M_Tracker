@@ -142,7 +142,7 @@ object BackupManager {
         val groups = d.allGroups(); val groupMembers = d.allGroupMembers(); val groupDebts = d.allGroupDebts()
         val trips = d.allTrips(); val tripMembers = d.allTripMembers(); val tripDebts = d.allTripDebts()
         JSONObject().apply {
-            put("app", "Arthak"); put("schema", 7); put("exportedAt", System.currentTimeMillis())
+            put("app", "Arthak"); put("schema", 8); put("exportedAt", System.currentTimeMillis())
             put("accounts", JSONArray().also { a -> accs.forEach {
                 a.put(JSONObject().put("id", it.id).put("name", it.name).put("type", it.type)
                     .put("opening", it.openingBalance).put("color", it.color)
@@ -150,7 +150,7 @@ object BackupManager {
             } })
             put("transactions", JSONArray().also { a -> txns.forEach {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
-                    .put("note", it.note).put("date", it.date).put("category", it.category).put("account", it.accountId)
+                    .put("note", it.note).put("date", it.date).put("category", HeadsMath.cleanName(it.category)).put("account", it.accountId)
                     .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget).put("created", it.createdAt)
                     .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items)
                     .put("trip", it.tripId))
@@ -159,13 +159,14 @@ object BackupManager {
                 a.put(JSONObject().put("id", it.id).put("name", PeopleMath.name(it.name)).put("rel", it.relation).put("phone", it.phone)
                     .put("note", it.note).put("photo", it.photoUri))
             } })
-            put("budgets", JSONArray().also { a -> budgets.forEach { a.put(JSONObject().put("name", it.name).put("amount", it.amount)) } })
+            put("budgets", JSONArray().also { a -> budgets.forEach { a.put(JSONObject().put("name", HeadsMath.cleanName(it.name)).put("amount", it.amount)) } })
             put("categories", JSONArray().also { a -> cats.forEach {
-                a.put(JSONObject().put("name", it.name).put("kind", it.kind).put("icon", it.icon))
+                a.put(JSONObject().put("name", HeadsMath.cleanName(it.name)).put("kind", it.kind).put("icon", it.icon)
+                    .put("order", it.sortOrder).put("hidden", it.hidden))
             } })
             put("recurring", JSONArray().also { a -> recs.forEach {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
-                    .put("note", it.note).put("category", it.category).put("account", it.accountId)
+                    .put("note", it.note).put("category", HeadsMath.cleanName(it.category)).put("account", it.accountId)
                     .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget)
                     .put("freq", it.freq).put("nextDue", it.nextDue))
             } })
@@ -176,7 +177,7 @@ object BackupManager {
             put("daymarks", JSONArray().also { a -> marks.forEach { a.put(JSONObject().put("date", it.date)) } })
             put("deleted", JSONArray().also { a -> deleted.forEach {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
-                    .put("note", it.note).put("date", it.date).put("category", it.category).put("account", it.accountId)
+                    .put("note", it.note).put("date", it.date).put("category", HeadsMath.cleanName(it.category)).put("account", it.accountId)
                     .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget).put("created", it.createdAt)
                     .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items)
                     .put("trip", it.tripId).put("deletedAt", it.deletedAt))
@@ -216,8 +217,9 @@ object BackupManager {
     private fun parse(rawJson: String, passphrase: String?): ParsedBackup {
         val json = if (isEncrypted(rawJson)) decrypt(rawJson, passphrase.orEmpty()) else rawJson
         val o = JSONObject(json)
+        val schema = o.optInt("schema", 2)
         require(o.optString("app") in listOf("Arthak", "M_Tracker")) { "Not an Arthak backup." }
-        require(o.optInt("schema", 2) in 2..7) { "Unsupported backup version." }
+        require(schema in 2..8) { "Unsupported backup version." }
 
         fun JSONObject.toOrNull(k: String): Long? = if (isNull(k)) null else getLong(k)
         fun JSONObject.doubleOrNull(k: String): Double? = if (isNull(k)) null else getDouble(k)
@@ -296,7 +298,7 @@ object BackupManager {
             if (toId != null) require(toId in accountIds) { "Transfer references unknown destination account." }
             Txn(
                 it.getLong("id"), type, amt, it.getString("merchant").take(120), it.getString("note").take(500), date,
-                it.getString("category").take(80), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
+                HeadsMath.cleanName(it.getString("category")), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
                 it.optLong("created", 0).coerceIn(0L, MAX_EPOCH_MS), it.optLong("person", 0), owed,
                 it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000),
                 it.optLong("trip", 0)
@@ -306,13 +308,17 @@ object BackupManager {
         val budgets = (0 until budgetArr.length()).map { budgetArr.getJSONObject(it) }.map {
             val amt = requireFinite(it.getDouble("amount"), "budget")
             require(amt > 0.0) { "Budget amount must be positive." }
-            Budget(it.getString("name").take(80), amt)
+            Budget(HeadsMath.cleanName(it.getString("name")), amt)
         }
 
-        val cats = (0 until catArr.length()).map { catArr.getJSONObject(it) }.map {
+        val cats = (0 until catArr.length()).map { idx -> idx to catArr.getJSONObject(idx) }.map { (idx, it) ->
             val kind = it.getString("kind").trim().uppercase()
             require(kind in CAT_KINDS) { "Invalid category kind." }
-            Category(it.getString("name").take(80), kind, it.optString("icon", "").take(32))
+            val name = HeadsMath.cleanName(it.getString("name"))
+            require(name.isNotEmpty()) { "Invalid head name." }
+            // Legacy backups did not store head order, so their file order becomes the order.
+            val order = it.optInt("order", idx).coerceIn(0, MAX_OTHER)
+            Category(name, kind, it.optString("icon", "").take(32), order, it.optBoolean("hidden", false))
         }
 
         val recs = (0 until recArr.length()).map { recArr.getJSONObject(it) }.map {
@@ -329,7 +335,7 @@ object BackupManager {
             val nextDue = it.getLong("nextDue")
             require(nextDue in 946_684_800_000L..MAX_EPOCH_MS) { "Recurring nextDue out of valid range." }
             Recurring(it.getLong("id"), type, amt, it.getString("merchant").take(120), it.getString("note").take(500),
-                it.getString("category").take(80), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"), freq, nextDue)
+                HeadsMath.cleanName(it.getString("category")), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"), freq, nextDue)
         }
 
         val pending = (0 until pendingArr.length()).map { pendingArr.getJSONObject(it) }.map {
@@ -367,7 +373,7 @@ object BackupManager {
             require(deletedAt in MIN_EPOCH_MS..MAX_EPOCH_MS) { "Recycle timestamp out of range." }
             DeletedTxn(
                 it.getLong("id"), type, amt, it.getString("merchant").take(120), it.getString("note").take(500), date,
-                it.getString("category").take(80), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
+                HeadsMath.cleanName(it.getString("category")), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
                 it.optLong("created", 0).coerceIn(0L, MAX_EPOCH_MS), it.optLong("person", 0),
                 owed,
                 it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000), deletedAt,

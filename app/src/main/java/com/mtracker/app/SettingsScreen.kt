@@ -9,8 +9,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material.icons.Icons
@@ -48,6 +50,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -60,6 +63,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -79,7 +83,7 @@ fun SettingsScreen(
             "security" -> SecurityPage(vm, onMsg, onConfirm, back)
             "reminders" -> RemindersPage(vm, back) { page = "help" }
             "habits" -> HabitsPage(vm, back)
-            "categories" -> CategoriesPage(vm, back)
+            "categories" -> CategoriesPage(vm, onMsg, back)
             "recurring" -> RecurringPage(vm, back)
             "data" -> DataPage(vm, onMsg, onConfirm, back)
             "recycle" -> RecycleBinPage(vm, onMsg, back)
@@ -175,7 +179,7 @@ private fun AppearancePage(vm: MainViewModel, onBack: () -> Unit) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cap("Theme")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("OLED Black", theme == "OLED") { p.setTheme("OLED") }
                     Chip("Soft Dark", theme == "SOFT_DARK") { p.setTheme("SOFT_DARK") }
                     Chip("Editorial White", theme == "PAPER") { p.setTheme("PAPER") }
@@ -379,34 +383,151 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun CategoriesPage(vm: MainViewModel, onBack: () -> Unit) {
+private fun CategoriesPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> Unit) {
     val cats by vm.categories.collectAsState()
+    var order by remember(cats) { mutableStateOf(cats) }
     var creating by remember { mutableStateOf(false) }
-    SubPage("Heads (categories)", onBack) {
+    var renaming by remember { mutableStateOf<Category?>(null) }
+    var iconFor by remember { mutableStateOf<Category?>(null) }
+    var deleting by remember { mutableStateOf<Category?>(null) }
+
+    fun move(c: Category, steps: Int) {
+        val peers = order.filter { it.kind == c.kind }
+        val from = peers.indexOfFirst { it.name == c.name }
+        if (from < 0 || peers.size < 2) return
+        val to = (from + steps).coerceIn(0, peers.lastIndex)
+        if (from == to) return
+        val moved = peers.toMutableList().also { it.add(to, it.removeAt(from)) }
+        var p = 0
+        order = order.map { if (it.kind == c.kind) moved[p++] else it }
+        vm.reorderHeads(c.kind, moved.map { it.name }) { msg -> onMsg(msg); order = cats }
+    }
+
+    SubPage("Heads & icons", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 MonoButton("+ New head", { creating = true })
                 MonoButton("Restore predefined heads", { vm.restoreDefaultHeads() }, filled = false)
-                Text("Heads are the buckets you file money into. Deleting one never changes past transactions. Restoring predefined heads only adds missing ones.", color = L.muted, fontSize = 12.sp)
+                Text(
+                    "Drag ≡ to reorder, or rename, change the icon, hide or delete a head. Hidden heads stay in old entries but leave the pickers. Deleting never changes past transactions.",
+                    color = L.muted, fontSize = 12.sp, lineHeight = 17.sp
+                )
             }
             Hairline()
         }
-        items(cats, key = { it.kind + it.name }) { c ->
+        items(order, key = { it.kind + "/" + it.name }) { c ->
             Column {
-                Row(Modifier.fillMaxWidth().padding(24.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    HeadTile(c.name, 40.dp, stored = c.icon.ifEmpty { null })
-                    Spacer(Modifier.width(14.dp))
+                Row(Modifier.fillMaxWidth().padding(14.dp, 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier.size(30.dp, 52.dp).clip(RoundedCornerShape(10.dp)).background(L.surface)
+                            .pointerInput(c.name, c.kind, order) {
+                                var total = 0f
+                                detectDragGestures(
+                                    onDragEnd = {
+                                        val steps = (total / 64.dp.toPx()).roundToInt()
+                                        total = 0f
+                                        if (steps != 0) move(c, steps)
+                                    },
+                                    onDragCancel = { total = 0f }
+                                ) { change, drag ->
+                                    change.consume()
+                                    total += drag.y
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) { Cap("≡", color = L.muted) }
+                    Spacer(Modifier.width(8.dp))
+                    HeadTile(c.name, 38.dp, stored = c.icon.ifEmpty { null })
+                    Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(c.name, color = L.text, fontSize = 15.sp)
-                        Cap(c.kind, color = L.muted)
+                        Text(c.name, color = if (c.hidden) L.muted else L.text, fontSize = 15.sp, maxLines = 1)
+                        Cap(if (c.hidden) "${c.kind} · hidden" else c.kind, color = L.muted)
                     }
-                    Cap("Delete", Modifier.clickable { vm.deleteCategory(c.name, c.kind) }.padding(8.dp), color = L.red)
+                    Cap("NAME", Modifier.clickable { renaming = c }.padding(7.dp, 8.dp))
+                    Cap("ICON", Modifier.clickable { iconFor = c }.padding(7.dp, 8.dp))
+                    Cap(
+                        if (c.hidden) "SHOW" else "HIDE",
+                        Modifier.clickable { vm.setHeadHidden(c, !c.hidden, onMsg) }.padding(7.dp, 8.dp)
+                    )
+                    Cap("DEL", Modifier.clickable { deleting = c }.padding(7.dp, 8.dp), color = L.red)
                 }
-                Hairline(Modifier.padding(start = 78.dp))
+                Hairline(Modifier.padding(start = 52.dp))
             }
         }
     }
-    if (creating) NewHeadDialog("EXPENSE", { n, k, ic -> vm.addHead(n, k, ic); creating = false }, { creating = false })
+    if (creating) NewHeadDialog(
+        "EXPENSE", { n, k, ic -> vm.addHead(n, k, ic, { creating = false }, { onMsg(it) }) }, { creating = false }
+    )
+    renaming?.let { c ->
+        RenameHeadDialog(
+            initial = c.name,
+            onSave = { name -> vm.renameHead(c, name, { renaming = null }, { onMsg(it) }) },
+            onDismiss = { renaming = null }
+        )
+    }
+    iconFor?.let { c ->
+        HeadIconDialog(
+            c = c,
+            onPick = { key -> vm.setHeadIcon(c, key, onMsg); iconFor = null },
+            onDismiss = { iconFor = null }
+        )
+    }
+    deleting?.let { c ->
+        AlertDialog(
+            onDismissRequest = { deleting = null }, containerColor = L.surface, shape = RoundedCornerShape(10.dp),
+            title = { Cap("Delete “${c.name}”?", color = L.text) },
+            text = { Text("Past transactions stay unchanged. Its icon, order and hidden state will be removed.", color = L.muted, fontSize = 13.sp) },
+            confirmButton = {
+                TextButton({
+                    vm.deleteCategory(c.name, c.kind)
+                    deleting = null
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton({ deleting = null }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun RenameHeadDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(10.dp),
+        title = { Cap("Rename head", color = L.text) },
+        text = { Field("Name", name, { name = it }) },
+        confirmButton = { TextButton({ if (name.isNotBlank()) onSave(name.trim()) }) { Text("Save") } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+private fun HeadIconDialog(c: Category, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var icon by remember(c.name, c.icon) { mutableStateOf(c.icon.ifEmpty { guessIconKey(c.name) }) }
+    val shape = RoundedCornerShape(12.dp)
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(10.dp),
+        title = { Cap("Icon · " + c.name, color = L.text) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    HEAD_ICON_KEYS.chunked(6).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { (k, vector) ->
+                                Box(
+                                    Modifier.size(44.dp).clip(shape)
+                                        .border(if (k == icon) 2.dp else 1.dp, if (k == icon) L.text else L.border, shape)
+                                        .clickable { icon = k },
+                                    contentAlignment = Alignment.Center
+                                ) { Icon(vector, null, tint = L.text, modifier = Modifier.size(22.dp)) }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton({ onPick(icon) }) { Text("Save") } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable

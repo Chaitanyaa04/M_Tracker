@@ -221,7 +221,8 @@ fun AddEditTransactionSheet(
     fun accLabel(a: Account) = if (a.archived) "${a.name} (archived)" else a.name
     val accOptions = activeAccounts.map { accLabel(it) to it.id }
     val accName = { id: Long -> activeAccounts.firstOrNull { it.id == id }?.let { a -> accLabel(a) } ?: "Select" }
-    val iconKey = (LocalHeadIcons.current[category])?.takeIf { it in HEAD_ICON_MAP } ?: guessIconKey(category)
+    val iconKey = (LocalHeadIcons.current["$type|$category"] ?: LocalHeadIcons.current[category])
+        ?.takeIf { it in HEAD_ICON_MAP } ?: guessIconKey(category)
     val showTrip = type == "EXPENSE" && iconKey in setOf("car", "bus", "flight")
 
     val subtotal = items.sumOf { it.price.toDoubleOrNull() ?: 0.0 }

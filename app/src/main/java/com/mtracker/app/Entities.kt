@@ -77,7 +77,11 @@ data class Recurring(
 
 /** kind: EXPENSE | INCOME */
 @Entity(tableName = "categories", primaryKeys = ["name", "kind"])
-data class Category(val name: String, val kind: String, val icon: String = "")
+data class Category(
+    val name: String, val kind: String, val icon: String = "",
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
+    @ColumnInfo(defaultValue = "0") val hidden: Boolean = false
+)
 
 /** A day you confirmed "no spending", so it still counts toward your streak. */
 @Entity(tableName = "daymarks")

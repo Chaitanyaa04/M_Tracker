@@ -39,6 +39,16 @@ private fun seedCategoriesWithIcons(db: SupportSQLiteDatabase) {
     }
 }
 
+/** Known heads get their familiar order; custom heads keep the row order already assigned. */
+private fun assignHeadOrder(db: SupportSQLiteDatabase) {
+    DEFAULT_EXPENSE_CATEGORIES.forEachIndexed { i, name ->
+        db.execSQL("UPDATE categories SET sortOrder=? WHERE name=? AND kind='EXPENSE'", arrayOf<Any>(i, name))
+    }
+    DEFAULT_INCOME_CATEGORIES.forEachIndexed { i, name ->
+        db.execSQL("UPDATE categories SET sortOrder=? WHERE name=? AND kind='INCOME'", arrayOf<Any>(i, name))
+    }
+}
+
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `pending` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `time` INTEGER NOT NULL, `pkg` TEXT NOT NULL, `label` TEXT NOT NULL, `accountId` INTEGER NOT NULL, `amount` REAL, `merchant` TEXT)")
@@ -119,12 +129,22 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/** v9: heads get an explicit order and a hidden flag. Existing history is untouched. */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE categories ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE categories ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE categories SET sortOrder = rowid")
+        assignHeadOrder(db)
+    }
+}
+
 @Database(
     entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class,
         Category::class, DayMark::class, Person::class, DeletedTxn::class, ChangeHistory::class,
         OccasionGroup::class, GroupMember::class, GroupDebt::class,
         Trip::class, TripMember::class, TripDebt::class],
-    version = 8, exportSchema = false
+    version = 9, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): LedgerDao
@@ -134,12 +154,13 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(c: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(c.applicationContext, AppDatabase::class.java, "ledger.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Cash','CASH',0.0,2,0,1)")
                         db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Bank Account','BANK',0.0,0,0,0)")
                         seedCategoriesWithIcons(db)
+                        assignHeadOrder(db)
                     }
                 })
                 .build().also { inst = it }
