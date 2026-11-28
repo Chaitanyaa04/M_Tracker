@@ -1,6 +1,6 @@
 # Arthak roadmap
 
-Status as of 2026-11-28; last verified dev release `dev-1.3.38`.
+Status as of 2026-11-28; last verified dev release `dev-1.3.39`.
 
 ## Shipped
 
