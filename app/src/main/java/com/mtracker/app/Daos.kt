@@ -77,6 +77,9 @@ interface LedgerDao {
     @Query("SELECT * FROM pending WHERE id = :id") suspend fun pendingById(id: Long): Pending?
     @Query("SELECT * FROM pending") suspend fun allPending(): List<Pending>
     @Query("SELECT COUNT(*) FROM pending") suspend fun pendingCount(): Int
+    /** Drops cached notification-derived amount/merchant from older builds; never touches ledger rows. */
+    @Query("UPDATE pending SET amount = NULL, merchant = NULL WHERE amount IS NOT NULL OR merchant IS NOT NULL")
+    suspend fun clearPendingExtras()
 
     // recurring
     @Query("SELECT * FROM recurring ORDER BY nextDue") fun recurring(): Flow<List<Recurring>>

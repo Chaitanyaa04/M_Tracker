@@ -12,8 +12,8 @@ import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.*
 
 /**
- * Mode A. Looks ONLY at "which package came to the foreground" from UsageStatsManager.
- * No screen content, SMS or notification text is ever read.
+ * Looks ONLY at "which package came to the foreground" from UsageStatsManager.
+ * No screen content, SMS, notification text or amount is ever read.
  */
 class AppLaunchMonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -44,7 +44,6 @@ class AppLaunchMonitorService : Service() {
 
     private fun poll() {
         val p = AppPrefs.get(this)
-        if (p.mode.value != "A") { stopSelf(); return }
         val usm = getSystemService(UsageStatsManager::class.java)
         val now = System.currentTimeMillis()
         val ev = usm.queryEvents(last, now)
@@ -59,14 +58,13 @@ class AppLaunchMonitorService : Service() {
 
     private fun handle(pkg: String, p: AppPrefs) {
         val accId = p.apps.value[pkg] ?: return
-        val delayMs = p.delaySec.value * 1000L
+        // Wrong calls raise the bar here too, just like in quiet mode.
+        val delayMs = maxOf(p.delaySec.value * 1000L, p.minDwellMs(pkg))
         if (!Cooldown.tryStart(pkg, maxOf(p.cooldownMs(), delayMs + 5_000))) return
         scope.launch {
             delay(delayMs)
-            if (p.mode.value == "A") {
-                val c = applicationContext
-                ReminderNotifier.show(c, pkg, Perms.label(c, pkg), accId, null, null)
-            }
+            val c = applicationContext
+            ReminderNotifier.show(c, pkg, Perms.label(c, pkg), accId)
         }
     }
 

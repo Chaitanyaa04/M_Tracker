@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
@@ -230,7 +231,6 @@ private fun SecurityPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: 
 private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> Unit) {
     val ctx = LocalContext.current
     val p = vm.prefs
-    val mode by p.mode.collectAsState()
     val live by p.liveDetect.collectAsState()
     val cd by p.cooldownSec.collectAsState()
     val delay by p.delaySec.collectAsState()
@@ -243,44 +243,34 @@ private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> U
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
     LaunchedEffect(Unit) { installed = withContext(Dispatchers.IO) { loadLaunchables(ctx) } }
     val usageOk = remember(tick) { Perms.usage(ctx) }
-    val listenerOk = remember(tick) { Perms.listener(ctx) }
     val suggested = remember(installed, sel) { installed.filter { looksLikePayment(it.first, it.second) && it.second !in sel }.take(6) }
     val accOptions = listOf("No account" to 0L) + accs.map { it.name to it.id }
 
     SubPage("Payment reminders", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (BuildConfig.AUTOFILL) {
-                    Cap("Detection")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip("Which app I opened", mode == "A") { p.setMode("A"); MonitorController.sync(ctx) }
-                        Chip("Read notifications", mode == "B") { p.setMode("B"); MonitorController.sync(ctx) }
-                    }
+                Cap("How it works")
+                Text(
+                    "Arthak notices when one of your payment apps is opened and asks expense, income or wrong call. It never reads notification text, SMS, screens or amounts — you enter those yourself.",
+                    color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Quietly", !live) { p.setLive(false); MonitorController.sync(ctx) }
+                    Chip("Instantly", live) { p.setLive(true); MonitorController.sync(ctx) }
                 }
-                if (mode == "A") {
-                    Cap("How should it notice?")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Chip("Quietly", !live) { p.setLive(false); MonitorController.sync(ctx) }
-                        Chip("Instantly", live) { p.setLive(true); MonitorController.sync(ctx) }
-                    }
-                    Text(
-                        if (!live) "Checks in the background every ~15 minutes and sends one tidy summary. Nothing sits in your notification shade. Short glances at an app are ignored."
-                        else "Notices right away and asks after a short delay. Android requires a small status notification while this is on.",
-                        color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
-                    )
-                    if (live) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120).forEach { (l, s) -> Chip(l, delay == s) { p.setDelay(s) } }
-                    }
-                    if (usageOk) Cap("Usage access granted", color = L.green)
-                    else {
-                        MonoButton("Allow usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
-                        Text("Greyed out? That’s Android’s sideload lock.", color = L.muted, fontSize = 12.sp)
-                        MonoButton("Show me how to fix it", onHelp, filled = false)
-                    }
-                } else {
-                    Text("Reads the amount and merchant from notifications of the apps below, on this device only.", color = L.muted, fontSize = 12.sp)
-                    if (listenerOk) Cap("Notification access granted", color = L.green)
-                    else MonoButton("Allow notification access", { ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+                Text(
+                    if (!live) "Checks every ~15 minutes and sends one tidy summary. Nothing sits in your notification shade. Short glances are ignored."
+                    else "Asks after a short delay. Android requires a small status notification while this is on.",
+                    color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
+                )
+                if (live) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120).forEach { (l, s) -> Chip(l, delay == s) { p.setDelay(s) } }
+                }
+                if (usageOk) Cap("Usage access granted", color = L.green)
+                else {
+                    MonoButton("Allow usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
+                    Text("Greyed out? That’s Android’s sideload lock.", color = L.muted, fontSize = 12.sp)
+                    MonoButton("Show me how to fix it", onHelp, filled = false)
                 }
                 Cap("Quiet period after a prompt")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

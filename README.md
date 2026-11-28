@@ -50,6 +50,10 @@ Afterwards, the app checks GitHub daily and on resume. It shows one notification
 
 System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available in Settings. All four chips stay reachable on narrow screens; System dark uses Soft Dark, and OLED Black is pure black. The daily safe-to-spend card is off by default and can be enabled under Settings → Appearance.
 
+## Payment prompts
+
+Add the payment apps you use under Settings → Payment reminders. Arthak only notices *which* of those apps was opened; it never reads notification text, SMS, screens, contacts or amounts. It asks **Expense / Income / Wrong call**, then opens an empty entry sheet so you type the amount and merchant yourself. Nothing is saved automatically from a notification. Quiet mode checks about every 15 minutes; Instant mode asks sooner and shows a small status notification.
+
 ## Data safety
 
 - Backups are encrypted locally with AES-256-GCM using your passphrase and include the Recycle Bin and change history. Restore previews and validates the file before asking for confirmation, and makes an app-private safety snapshot first. If a backup folder and passphrase are configured, an encrypted copy is saved there too.

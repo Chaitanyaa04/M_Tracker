@@ -172,7 +172,7 @@ object BackupManager {
             } })
             put("pending", JSONArray().also { a -> pendings.forEach {
                 a.put(JSONObject().put("id", it.id).put("time", it.time).put("pkg", it.pkg).put("label", it.label)
-                    .put("account", it.accountId).put("amount", it.amount ?: JSONObject.NULL).put("merchant", it.merchant ?: JSONObject.NULL))
+                    .put("account", it.accountId).put("amount", JSONObject.NULL).put("merchant", JSONObject.NULL))
             } })
             put("daymarks", JSONArray().also { a -> marks.forEach { a.put(JSONObject().put("date", it.date)) } })
             put("deleted", JSONArray().also { a -> deleted.forEach {
@@ -341,12 +341,11 @@ object BackupManager {
         val pending = (0 until pendingArr.length()).map { pendingArr.getJSONObject(it) }.map {
             val time = it.getLong("time")
             require(time in MIN_EPOCH_MS..MAX_EPOCH_MS) { "Pending time out of valid range." }
-            val amount = it.doubleOrNull("amount")?.let { v -> requireFinite(v, "pending amount") }
-            require(amount == null || amount >= 0.0) { "Negative pending amount." }
             val accId = it.getLong("account")
             require(accId == 0L || accId in accountIds) { "Pending prompt references unknown account." }
+            // Older backups may contain parsed notification text. Never bring it back.
             Pending(it.getLong("id"), time, it.getString("pkg").take(120), it.getString("label").take(160),
-                accId, amount, it.optString("merchant", "").take(120).ifBlank { null })
+                accId, null, null)
         }
 
         val marks = (0 until markArr.length()).map { markArr.getJSONObject(it) }.map {

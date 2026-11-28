@@ -8,7 +8,6 @@ import android.os.Process
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.ByteArrayOutputStream
@@ -24,15 +23,11 @@ import javax.crypto.spec.GCMParameterSpec
 object Extras {
     const val TYPE = "x_type"
     const val ACCOUNT = "x_account"
-    const val AMOUNT = "x_amount"
-    const val MERCHANT = "x_merchant"
     const val NOTIF_ID = "x_nid"
     const val PKG = "x_pkg"
     const val PENDING = "x_pending"
     const val OPEN = "x_open"
     const val TOKEN = "x_token"
-    const val ACTION_SAME = "com.mtracker.app.SAME_AGAIN"
-    const val ACTION_AMOUNT = "com.mtracker.app.ENTER_AMOUNT"
     const val ACTION_NO_SPEND = "com.mtracker.app.NO_SPEND"
     const val ACTION_WRONG = "com.mtracker.app.WRONG_CALL"
 }
@@ -91,7 +86,6 @@ private object LocalKeyWrap {
 class AppPrefs private constructor(c: Context) {
     private val sp = c.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
     val theme = MutableStateFlow(sp.getString("theme", "OLED") ?: "OLED")        // OLED | PAPER | SOFT_DARK | SYSTEM
-    val mode = MutableStateFlow(sp.getString("mode", "A") ?: "A")                // A = app launch, B = notification text
     val delaySec = MutableStateFlow(sp.getInt("delay", 30))
     val apps = MutableStateFlow(load())
     val checkinHour = MutableStateFlow(sp.getInt("checkin", 21))                   // -1 = off
@@ -154,7 +148,6 @@ class AppPrefs private constructor(c: Context) {
             .associate { val kv = it.split("="); kv[0] to (kv[1].toLongOrNull() ?: 0L) }
 
     fun setTheme(v: String) { theme.value = v; sp.edit().putString("theme", v).apply() }
-    fun setMode(v: String) { mode.value = v; sp.edit().putString("mode", v).apply() }
     fun setDelay(v: Int) { delaySec.value = v; sp.edit().putInt("delay", v).apply() }
     fun setCheckin(v: Int) { checkinHour.value = v; sp.edit().putInt("checkin", v).apply() }
     fun setHide(v: Boolean) { hideBalances.value = v; sp.edit().putBoolean("hide", v).apply() }
@@ -263,9 +256,6 @@ object Perms {
         return mode == AppOpsManager.MODE_ALLOWED
     }
 
-    fun listener(c: Context): Boolean =
-        NotificationManagerCompat.getEnabledListenerPackages(c).contains(c.packageName)
-
     fun label(c: Context, pkg: String): String = try {
         val pm = c.packageManager
         pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
@@ -277,7 +267,7 @@ object MonitorController {
      *  Instant mode (opt-in): foreground service with a small status notification. */
     fun sync(c: Context) {
         val p = AppPrefs.get(c)
-        val have = p.mode.value == "A" && p.apps.value.isNotEmpty() && Perms.usage(c)
+        val have = p.apps.value.isNotEmpty() && Perms.usage(c)
         val live = have && p.liveDetect.value
         val i = Intent(c, AppLaunchMonitorService::class.java)
         try {

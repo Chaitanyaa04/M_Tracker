@@ -172,15 +172,14 @@ fun PendingRow(p: Pending, onAction: (Pending, String) -> Unit) {
             }
             Spacer(Modifier.width(14.dp))
             Column {
-                val title = (p.amount?.let { inr(it) } ?: "Payment") + (p.merchant?.let { " at $it" } ?: "") + " via ${p.label}"
-                Text(title, color = L.text, fontSize = 15.sp, maxLines = 1)
+                Text("Payment via ${p.label}", color = L.text, fontSize = 15.sp, maxLines = 1)
                 Spacer(Modifier.height(2.dp))
                 Text(whenText, color = L.muted, fontSize = 12.sp)
                 Spacer(Modifier.height(10.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Expense", true) { onAction(p, "EXPENSE") }
                     Chip("Income", false) { onAction(p, "INCOME") }
-                    Chip("Dismiss", false) { onAction(p, "DISMISS") }
+                    Chip("Wrong call", false) { onAction(p, "DISMISS") }
                 }
             }
         }

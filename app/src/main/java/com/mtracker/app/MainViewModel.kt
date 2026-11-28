@@ -159,6 +159,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         materialize()
         viewModelScope.launch {
+            repo.clearPendingExtras()   // old builds cached notification text; new prompts never do
             if (!prefs.defaultHeadsSeededV6.value) {
                 repo.seedDefaultHeads()
                 prefs.setDefaultHeadsSeededV6(true)
@@ -188,14 +189,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun fromReminder(type: String, accountId: Long, amount: Double?, merchant: String?, pendingId: Long) {
+    /** A payment prompt opens an empty draft: you enter the amount and merchant yourself. */
+    fun fromReminder(type: String, accountId: Long, pendingId: Long) {
         draft.value = Draft(
             type = type, accountId = if (accountId != 0L) accountId else firstAcc(),
-            amount = amount?.let { fmtAmt(it) } ?: "", merchant = merchant ?: "", pendingId = pendingId
+            pendingId = pendingId
         )
     }
 
-    fun fromPending(p: Pending, type: String) = fromReminder(type, p.accountId, p.amount, p.merchant, p.id)
+    fun fromPending(p: Pending, type: String) = fromReminder(type, p.accountId, p.id)
 
     fun dismissPending(p: Pending) = viewModelScope.launch {
         repo.deletePending(p.id)

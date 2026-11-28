@@ -8,7 +8,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.app.RemoteInput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,21 +52,18 @@ object ReminderNotifier {
         )
     }
 
-    /**
-     * One prompt per quiet period (you choose 10 s to 10 min). A repeat trigger inside it is ignored even if you
-     * already dismissed the first one. A prompt that carries its own amount is a different payment, so it always passes.
-     */
-    fun show(c: Context, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?) {
+    /** One prompt per quiet period (10 s to 10 min). No amount or merchant is read from anywhere. */
+    fun show(c: Context, pkg: String, label: String, accountId: Long) {
         val app = c.applicationContext
         scope.launch {
             val p = AppPrefs.get(app)
             val now = System.currentTimeMillis()
-            if (amount == null && now - p.lastPrompt(pkg) < p.cooldownMs()) return@launch
+            if (now - p.lastPrompt(pkg) < p.cooldownMs()) return@launch
             p.setPrompt(pkg, now)
-            val dao = AppDatabase.get(app).dao()
-            val pid = dao.insertPending(Pending(time = now, pkg = pkg, label = label, accountId = accountId, amount = amount, merchant = merchant))
-            val last = if (accountId != 0L) dao.lastExpenseFor(accountId) else null
-            post(app, pid, pkg, label, accountId, amount, merchant, last)
+            val pid = AppDatabase.get(app).dao().insertPending(
+                Pending(time = now, pkg = pkg, label = label, accountId = accountId)
+            )
+            post(app, pid, pkg, label, accountId)
         }
     }
 
@@ -84,7 +80,7 @@ object ReminderNotifier {
         nm.notify(4, NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_stat_rupee)
             .setContentTitle(if (count == 1) "1 payment visit to log" else "$count payment visits to log")
-            .setContentText("Tap to review. Dismiss any that were a mistake.")
+            .setContentText("Tap to review. Mark mistakes as wrong call.")
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(pub)
             .setAutoCancel(true).setContentIntent(activityPi(c, 8001, null)).build())
@@ -101,27 +97,6 @@ object ReminderNotifier {
             .setContentText("Tap to update. It takes a few seconds.")
             .setAutoCancel(true)
             .setContentIntent(activityPi(c, 8002, null) { putExtra(Extras.OPEN, "updates") }).build())
-    }
-
-    /** Brief "logged" receipt after a one-tap action; removes itself after a few seconds. */
-    @SuppressLint("MissingPermission")
-    fun confirm(c: Context, text: String) {
-        ensureChannels(c)
-        val nm = NotificationManagerCompat.from(c)
-        if (!nm.areNotificationsEnabled()) return
-        val pub = NotificationCompat.Builder(c, CH_UPDATE)
-            .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle("Arthak")
-            .setContentText("Transaction logged")
-            .build()
-        nm.notify(6, NotificationCompat.Builder(c, CH_UPDATE)
-            .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle("Logged")
-            .setContentText(text)
-            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setPublicVersion(pub)
-            .setAutoCancel(true).setTimeoutAfter(6_000)
-            .setContentIntent(activityPi(c, 8003, null)).build())
     }
 
     /** Failure notice for the daily encrypted backup worker. No financial data is shown. */
@@ -141,25 +116,24 @@ object ReminderNotifier {
     }
 
     @SuppressLint("MissingPermission")
-    private fun post(c: Context, pid: Long, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?, last: Txn?) {
+    private fun post(c: Context, pid: Long, pkg: String, label: String, accountId: Long) {
         ensureChannels(c)
         val nm = NotificationManagerCompat.from(c)
         if (!nm.areNotificationsEnabled()) return
         val nid = pid.toInt()
         val appLocked = AppPrefs.get(c).lockEnabled.value
 
-        fun act(type: String, rc: Int) = activityPi(c, nid * 8 + rc, type) {
+        // Opening Expense / Income only creates an empty draft. No ledger write happens from the notification.
+        fun draft(type: String, rc: Int) = activityPi(c, nid * 8 + rc, type) {
             putExtra(Extras.ACCOUNT, accountId)
             putExtra(Extras.NOTIF_ID, nid)
             putExtra(Extras.PENDING, pid)
-            if (amount != null) putExtra(Extras.AMOUNT, amount)
-            if (merchant != null) putExtra(Extras.MERCHANT, merchant)
         }
-        fun bc(action: String, rc: Int, mutable: Boolean = false) = PendingIntent.getBroadcast(
-            c, nid * 8 + rc,
-            Intent(c, NotificationActionReceiver::class.java).setAction(action).setPackage(c.packageName)
-                .putExtra(Extras.NOTIF_ID, nid).putExtra(Extras.PKG, pkg).putExtra(Extras.PENDING, pid).putExtra(Extras.ACCOUNT, accountId),
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
+        val wrong = PendingIntent.getBroadcast(
+            c, nid * 8 + 3,
+            Intent(c, NotificationActionReceiver::class.java).setAction(Extras.ACTION_WRONG).setPackage(c.packageName)
+                .putExtra(Extras.NOTIF_ID, nid).putExtra(Extras.PKG, pkg).putExtra(Extras.PENDING, pid),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val pub = NotificationCompat.Builder(c, CH)
@@ -168,43 +142,25 @@ object ReminderNotifier {
             .setContentText("Payment reminder — unlock to view")
             .build()
 
-        val title = if (appLocked) {
-            "Did you just pay via $label?"
-        } else if (amount != null) {
-            "Log ${inr(amount)}" + (if (!merchant.isNullOrBlank()) " at $merchant" else "") + "?"
-        } else {
-            "Did you just pay via $label?"
-        }
-        val lastTitle = last?.let { it.note.ifBlank { it.merchant }.ifBlank { it.category } }
-        val bodyText = if (appLocked) {
-            "Open Arthak and unlock to log this payment."
-        } else if (last != null) {
-            "Last time: $lastTitle · ${inr(last.amount)}"
-        } else {
-            label
-        }
-
         val b = NotificationCompat.Builder(c, CH)
             .setSmallIcon(R.drawable.ic_stat_rupee)
-            .setContentTitle(title)
-            .setContentText(bodyText)
+            .setContentTitle("Did you pay via $label?")
+            .setContentText(
+                if (appLocked) "Open Arthak and unlock to log it."
+                else "Choose expense, income or wrong call. You enter the details."
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(pub)
             .setAutoCancel(true).setOnlyAlertOnce(true)
-            .setTimeoutAfter(30 * 60_000L)   // it stays in the app under "Unlogged payments"
-            .setContentIntent(act("EXPENSE", 0))
+            .setTimeoutAfter(30 * 60_000L)   // it also stays in the app under "Unlogged payments"
+            .setContentIntent(draft("EXPENSE", 0))
 
-        // Only expose direct background write actions when App Lock is disabled.
         if (!appLocked) {
-            val enter = NotificationCompat.Action.Builder(0, "Enter amount", bc(Extras.ACTION_AMOUNT, 3, mutable = true))
-                .addRemoteInput(RemoteInput.Builder("amount").setLabel("Amount, e.g. 250").build())
-                .setAllowGeneratedReplies(false).build()
-            if (last != null) b.addAction(0, "Same again · ${inr(last.amount)}", bc(Extras.ACTION_SAME, 1))
-            else b.addAction(0, "Expense", act("EXPENSE", 0))
-            b.addAction(enter)
-            b.addAction(0, "Wrong call", bc(Extras.ACTION_WRONG, 2))
+            b.addAction(0, "Expense", draft("EXPENSE", 1))
+            b.addAction(0, "Income", draft("INCOME", 2))
+            b.addAction(0, "Wrong call", wrong)
         }
         nm.notify(nid, b.build())
     }

@@ -195,6 +195,7 @@ class Repository(private val db: AppDatabase) {
 
     suspend fun deleteRecurring(id: Long) = d.deleteRecurring(id)
     suspend fun deletePending(id: Long) = d.deletePending(id)
+    suspend fun clearPendingExtras() = d.clearPendingExtras()
     suspend fun addCategory(name: String, kind: String, icon: String = "") = db.withTransaction {
         val clean = HeadsMath.cleanName(name)
         require(clean.isNotBlank()) { "Name is required." }

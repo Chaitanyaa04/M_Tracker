@@ -156,17 +156,13 @@ class MainActivity : FragmentActivity() {
             if (type !in ALLOWED_INTERNAL_TYPES) { i.removeExtra(Extras.TYPE); return }
             val nid = i.getIntExtra(Extras.NOTIF_ID, -1)
             if (nid >= 0) NotificationManagerCompat.from(this).cancel(nid)
-            val amount = if (i.hasExtra(Extras.AMOUNT)) {
-                i.getDoubleExtra(Extras.AMOUNT, 0.0).takeIf { it.isFinite() && it > 0.0 }
-            } else null
-            val merchant = i.getStringExtra(Extras.MERCHANT)?.trim()?.take(80)
-            vm.fromReminder(type, i.getLongExtra(Extras.ACCOUNT, 0L), amount, merchant, i.getLongExtra(Extras.PENDING, 0L))
+            vm.fromReminder(type, i.getLongExtra(Extras.ACCOUNT, 0L), i.getLongExtra(Extras.PENDING, 0L))
             i.removeExtra(Extras.TYPE)
         } else {
             // Untrusted/external intents (including static launcher shortcuts) may only open an empty EXPENSE or INCOME draft.
             val type = i.getStringExtra(Extras.TYPE)
             if (type in ALLOWED_SHORTCUT_TYPES) {
-                vm.fromReminder(type!!, 0L, null, null, 0L)
+                vm.fromReminder(type!!, 0L, 0L)
             }
             i.removeExtra(Extras.TYPE)
             i.removeExtra(Extras.OPEN)
@@ -246,7 +242,6 @@ private fun FloatingNav(tab: Int, showSettings: Boolean, onTab: (Int) -> Unit, o
 @Composable
 private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val ctx = LocalContext.current
-    val mode by vm.prefs.mode.collectAsState()
     val apps by vm.prefs.apps.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -284,7 +279,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
         val pr = vm.prefs
         if (pr.updateCheck.value && System.currentTimeMillis() - pr.lastUpdateCheck.value > 12 * 3_600_000L) Updater.check(ctx)
     }
-    LaunchedEffect(mode, apps) { MonitorController.sync(ctx) }
+    LaunchedEffect(apps) { MonitorController.sync(ctx) }
 
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) {
@@ -294,9 +289,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     }
     BackHandler(showSettings) { showSettings = false }
 
-    val status = remember(tick, mode) {
-        if (mode == "A") DetectStatus("App-Launch Guard", Perms.usage(ctx)) else DetectStatus("Notification Parser", Perms.listener(ctx))
-    }
+    val status = remember(tick) { DetectStatus("Payment prompts", Perms.usage(ctx)) }
 
     CompositionLocalProvider(LocalHeadIcons provides iconMap) {
         Scaffold(
@@ -345,9 +338,8 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
                         0 -> LedgerScreen(
                             vm, status,
                             onStatus = {
-                                if (!status.ok) ctx.startActivity(
-                                    Intent(if (mode == "A") Settings.ACTION_USAGE_ACCESS_SETTINGS else Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                                ) else showSettings = true
+                                if (!status.ok) ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                else showSettings = true
                             },
                             onDelete = { tx -> deleteTxn(tx) },
                             onPending = { p, a -> if (a == "DISMISS") vm.dismissPending(p) else vm.fromPending(p, a) }
