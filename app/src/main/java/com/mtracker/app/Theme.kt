@@ -58,6 +58,12 @@ val PaperColors = LedgerColors(
     accent = Color(0xFF000000), onAccent = Color(0xFFFFFFFF),
     green = Color(0xFF2E7D32), red = Color(0xFFB91C1C), dark = false
 )
+val SoftDarkColors = LedgerColors(
+    bg = Color(0xFF111214), surface = Color(0xFF1B1D21), border = Color(0xFF2B2E34),
+    text = Color(0xFFECECEC), muted = Color(0xFF9A9A9A),
+    accent = Color(0xFFE8E8E8), onAccent = Color(0xFF111214),
+    green = Color(0xFF6EE7A0), red = Color(0xFFF87171)
+)
 
 val LocalLedger = staticCompositionLocalOf { OledColors }
 val LocalHaptics = compositionLocalOf { true }
@@ -65,8 +71,13 @@ val L: LedgerColors @Composable @ReadOnlyComposable get() = LocalLedger.current
 
 @Composable
 fun LedgerTheme(mode: String, content: @Composable () -> Unit) {
-    val dark = when (mode) { "OLED" -> true; "PAPER" -> false; else -> isSystemInDarkTheme() }
-    val c = if (dark) OledColors else PaperColors
+    val dark = when (mode) { "OLED" -> true; "PAPER" -> false; "SOFT_DARK" -> true; else -> isSystemInDarkTheme() }
+    val c = when {
+        mode == "OLED" -> OledColors
+        mode == "SOFT_DARK" -> SoftDarkColors
+        dark -> SoftDarkColors   // System dark uses the gentler charcoal palette.
+        else -> PaperColors
+    }
     val scheme = if (dark) darkColorScheme(
         primary = c.accent, onPrimary = c.onAccent, background = c.bg, onBackground = c.text,
         surface = c.surface, onSurface = c.text, surfaceVariant = c.surface, onSurfaceVariant = c.muted,

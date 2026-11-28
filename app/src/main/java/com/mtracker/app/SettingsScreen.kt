@@ -15,7 +15,9 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Help
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Label
 import androidx.compose.material.icons.rounded.Lock
@@ -80,6 +82,8 @@ fun SettingsScreen(
             "categories" -> CategoriesPage(vm, back)
             "recurring" -> RecurringPage(vm, back)
             "data" -> DataPage(vm, onMsg, onConfirm, back)
+            "recycle" -> RecycleBinPage(vm, onMsg, back)
+            "history" -> ChangeHistoryPage(vm, back)
             "updates" -> UpdatesPage(vm, onMsg, onConfirm, back)
             "help" -> HelpPage(back)
             else -> AboutPage(back)
@@ -144,7 +148,9 @@ private fun SettingsHome(go: (String) -> Unit) {
         item { Cap("Your data", Modifier.padding(24.dp, 24.dp, 24.dp, 8.dp)) }
         item {
             Panel(Modifier.padding(horizontal = 16.dp)) {
-                NavRow("Backup & export", "Auto-backup, CSV, restore", Icons.Rounded.Backup, true) { go("data") }
+                NavRow("Backup & export", "Daily backup, CSV, restore", Icons.Rounded.Backup, false) { go("data") }
+                NavRow("Recycle bin", "Recover deleted transactions", Icons.Rounded.Delete, false) { go("recycle") }
+                NavRow("Change history", "Local edit and delete log", Icons.Rounded.History, true) { go("history") }
             }
         }
         item { Cap("App", Modifier.padding(24.dp, 24.dp, 24.dp, 8.dp)) }
@@ -164,17 +170,21 @@ private fun AppearancePage(vm: MainViewModel, onBack: () -> Unit) {
     val theme by p.theme.collectAsState()
     val hide by p.hideBalances.collectAsState()
     val haptics by p.haptics.collectAsState()
+    val showDaily by p.showDailyCard.collectAsState()
     SubPage("Appearance", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cap("Theme")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("OLED Black", theme == "OLED") { p.setTheme("OLED") }
+                    Chip("Soft Dark", theme == "SOFT_DARK") { p.setTheme("SOFT_DARK") }
                     Chip("Editorial White", theme == "PAPER") { p.setTheme("PAPER") }
                     Chip("System", theme == "SYSTEM") { p.setTheme("SYSTEM") }
                 }
+                Text("System dark uses Soft Dark. Choose OLED Black for pure-black screens.", color = L.muted, fontSize = 12.sp)
                 Spacer(Modifier.height(8.dp))
                 SwitchRow("Hide balances (shows ••••)", hide) { p.setHide(it) }
+                SwitchRow("Show daily safe-to-spend card", showDaily) { p.setShowDailyCard(it) }
                 SwitchRow("Haptic feedback on keypad", haptics) { p.setHaptics(it) }
             }
         }
@@ -221,7 +231,8 @@ private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> U
     val cd by p.cooldownSec.collectAsState()
     val delay by p.delaySec.collectAsState()
     val sel by p.apps.collectAsState()
-    val accs by vm.accounts.collectAsState()
+    val allAccs by vm.accounts.collectAsState()
+    val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     var installed by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     var browse by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
@@ -375,7 +386,8 @@ private fun CategoriesPage(vm: MainViewModel, onBack: () -> Unit) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 MonoButton("+ New head", { creating = true })
-                Text("Heads are the buckets you file money into. Deleting one never changes past transactions.", color = L.muted, fontSize = 12.sp)
+                MonoButton("Restore predefined heads", { vm.restoreDefaultHeads() }, filled = false)
+                Text("Heads are the buckets you file money into. Deleting one never changes past transactions. Restoring predefined heads only adds missing ones.", color = L.muted, fontSize = 12.sp)
             }
             Hairline()
         }
@@ -400,7 +412,8 @@ private fun CategoriesPage(vm: MainViewModel, onBack: () -> Unit) {
 @Composable
 private fun RecurringPage(vm: MainViewModel, onBack: () -> Unit) {
     val recs by vm.recurring.collectAsState()
-    val accs by vm.accounts.collectAsState()
+    val allAccs by vm.accounts.collectAsState()
+    val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     val names = remember(accs) { accs.associate { it.id to it.name } }
     SubPage("Repeating transactions", onBack) {
         if (recs.isEmpty()) item {
@@ -431,6 +444,9 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
     val last by p.lastBackup.collectAsState()
     var restoreUri by remember { mutableStateOf<Uri?>(null) }
     var restoreEncrypted by remember { mutableStateOf(false) }
+    var restorePass by remember { mutableStateOf("") }
+    var preview by remember { mutableStateOf<BackupPreview?>(null) }
+    var previewError by remember { mutableStateOf("") }
     var showPassDialog by remember { mutableStateOf(false) }
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { u -> if (u != null) vm.exportCsv(u, onMsg) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.importCsv(u, onMsg) }
@@ -443,6 +459,17 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
     }
     LaunchedEffect(restoreUri) {
         restoreEncrypted = restoreUri?.let { vm.isBackupEncrypted(it) } ?: false
+        restorePass = ""
+    }
+    LaunchedEffect(restoreUri, restorePass, restoreEncrypted) {
+        val u = restoreUri
+        if (u == null) {
+            preview = null; previewError = ""
+        } else {
+            val r = runCatching { vm.previewBackup(u, restorePass.takeIf { restoreEncrypted }) }
+            preview = r.getOrNull()
+            previewError = r.exceptionOrNull()?.message ?: ""
+        }
     }
     val lastText = if (last == 0L) "Never" else Instant.ofEpochMilli(last).atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a", Locale.ENGLISH))
@@ -461,7 +488,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
                     MonoButton(if (folder.isBlank()) "Choose folder" else "Change folder", { tree.launch(null) }, filled = false)
                 }
                 MonoButton("Back up now", { vm.backupNow(onMsg) })
-                SwitchRow("Automatic weekly backup", auto) { enable ->
+                SwitchRow("Automatic daily backup", auto) { enable ->
                     if (enable && !hasPass) {
                         onMsg("Set a backup passphrase first")
                     } else {
@@ -517,26 +544,97 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
     }
     restoreUri?.let { u ->
         var confirmText by remember { mutableStateOf("") }
-        var pass by remember { mutableStateOf("") }
-        val ready = confirmText.trim() == "RESTORE" && (!restoreEncrypted || pass.isNotBlank())
+        val ready = confirmText.trim() == "RESTORE" && preview != null && (!restoreEncrypted || restorePass.isNotBlank())
+        val previewText = preview?.let { b ->
+            val whenText = if (b.exportedAt == 0L) "unknown date" else
+                Instant.ofEpochMilli(b.exportedAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a", Locale.ENGLISH))
+            "Exported $whenText · ${b.accounts} accounts · ${b.transactions} transactions · ${b.persons} people\n" +
+                "${b.heads} heads · ${b.budgets} budgets · ${b.recurring} repeats · ${b.pending} prompts · ${b.dayMarks} day marks\n" +
+                "${b.deleted} in recycle bin · ${b.history} history entries"
+        } ?: if (previewError.isNotBlank()) "Backup check failed: $previewError" else "Checking backup…"
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,
             title = { Cap("Restore backup?", color = L.text) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("This replaces everything currently in Arthak — accounts, transactions, budgets and people — with the contents of the backup. This cannot be undone.", color = L.muted, fontSize = 14.sp)
-                    if (restoreEncrypted) Field("Backup passphrase", pass, { pass = it }, secret = true)
+                    Text("This replaces everything currently in Arthak with the file you chose. The file is checked first, and a recovery copy of today's data is saved on this phone before anything is changed.", color = L.muted, fontSize = 14.sp)
+                    Text(previewText, color = if (preview != null) L.text else L.red, fontSize = 12.sp)
+                    if (restoreEncrypted) Field("Backup passphrase", restorePass, { restorePass = it }, secret = true)
+                    Text("A private safety copy is always saved on this phone first. If a backup folder and passphrase are set, an encrypted copy is saved there too. If a required copy fails, restore is cancelled.", color = L.muted, fontSize = 12.sp)
                     Field("Type RESTORE to confirm", confirmText, { confirmText = it })
                 }
             },
             confirmButton = {
                 TextButton(
                     enabled = ready,
-                    onClick = { vm.restoreBackup(u, pass.takeIf { restoreEncrypted }, onMsg); restoreUri = null }
+                    onClick = { vm.restoreBackup(u, restorePass.takeIf { restoreEncrypted }, onMsg); restoreUri = null }
                 ) { Text("Restore", color = if (ready) L.red else L.muted) }
             },
             dismissButton = { TextButton({ restoreUri = null }) { Text("Cancel") } }
         )
+    }
+}
+
+@Composable
+private fun RecycleBinPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: () -> Unit) {
+    val deleted by vm.deletedTxns.collectAsState()
+    SubPage("Recycle bin", onBack) {
+        item {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Cap("Deleted transactions", color = L.text)
+                Text("Transactions deleted by swiping or by removing an account stay here until you restore or delete them forever. The bin is kept only on this phone.", color = L.muted, fontSize = 13.sp)
+            }
+            Hairline()
+        }
+        if (deleted.isEmpty()) item {
+            Text("Nothing in the bin.", color = L.muted, fontSize = 13.sp, modifier = Modifier.padding(24.dp))
+        }
+        items(deleted, key = { "d${it.id}" }) { d ->
+            Column {
+                Row(Modifier.fillMaxWidth().padding(24.dp, 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(d.merchant.ifBlank { d.note }.ifBlank { d.category }, color = L.text, fontSize = 15.sp, maxLines = 1)
+                        Text("${dayLabel(d.date)} · ${inrS(d.amount)} · ${d.type}", color = L.muted, fontSize = 12.sp)
+                    }
+                    Cap("Restore", Modifier.clickable { vm.restoreDeleted(d); onMsg("Transaction restored") }.padding(8.dp), color = L.green)
+                    Cap("Delete", Modifier.clickable { vm.deleteDeletedForever(d.id); onMsg("Deleted forever") }.padding(8.dp), color = L.red)
+                }
+                Hairline(Modifier.padding(start = 24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangeHistoryPage(vm: MainViewModel, onBack: () -> Unit) {
+    val history by vm.changeHistory.collectAsState()
+    SubPage("Change history", onBack) {
+        item {
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Cap("Recent local changes", color = L.text)
+                Text("Edits, deletions and restores are noted here with the earlier value. This log stays only on this phone.", color = L.muted, fontSize = 13.sp)
+            }
+            Hairline()
+        }
+        if (history.isEmpty()) item {
+            Text("No changes recorded yet.", color = L.muted, fontSize = 13.sp, modifier = Modifier.padding(24.dp))
+        }
+        items(history, key = { "h${it.id}" }) { h ->
+            val whenText = Instant.ofEpochMilli(h.changedAt).atZone(ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("d MMM, h:mm a", Locale.ENGLISH))
+            Column {
+                Row(Modifier.fillMaxWidth().padding(24.dp, 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(h.action.replace("_", " "), color = L.text, fontSize = 14.sp)
+                        Text("${h.entity} ${h.entityId} · $whenText", color = L.muted, fontSize = 12.sp)
+                    }
+                }
+                if (h.payload.isNotBlank()) {
+                    Text(h.payload.take(140), color = L.muted, fontSize = 11.sp, maxLines = 2, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 10.dp))
+                }
+                Hairline(Modifier.padding(start = 24.dp))
+            }
+        }
     }
 }
 

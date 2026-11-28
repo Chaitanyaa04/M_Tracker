@@ -55,23 +55,11 @@ data class Draft(
     val items: String = "",
     val personId: Long = 0,
     val split: String = "TAG",
-    val share: String = ""
+    val share: String = "",
+    val createdAt: Long = 0
 )
 
-fun computeBalances(t: List<Txn>, a: List<Account>): Map<Long, Double> {
-    val m = a.associate { it.id to it.openingBalance }.toMutableMap()
-    for (x in t) when (x.type) {
-        "INCOME" -> m[x.accountId] = (m[x.accountId] ?: 0.0) + x.amount
-        "EXPENSE" -> m[x.accountId] = (m[x.accountId] ?: 0.0) - x.amount
-        "PERSON_OUT" -> m[x.accountId] = (m[x.accountId] ?: 0.0) - x.amount
-        "PERSON_IN" -> m[x.accountId] = (m[x.accountId] ?: 0.0) + x.amount
-        "TRANSFER" -> {
-            m[x.accountId] = (m[x.accountId] ?: 0.0) - x.amount
-            x.toAccountId?.let { m[it] = (m[it] ?: 0.0) + x.amount }
-        }
-    }
-    return m
-}
+fun computeBalances(t: List<Txn>, a: List<Account>): Map<Long, Double> = LedgerMath.balances(t, a)
 
 /** Returns (consecutive logged days, whether today is already covered). Days with a "no spending" mark count. */
 fun computeStreak(t: List<Txn>, m: List<DayMark>): Pair<Int, Boolean> {
@@ -100,6 +88,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val categories = repo.categories.eager(emptyList())
     val dayMarks = repo.dayMarks.eager(emptyList())
     val persons = repo.persons.eager(emptyList())
+    val deletedTxns = repo.deletedTxns.eager(emptyList())
+    val changeHistory = repo.changeHistory.eager(emptyList())
     val peopleNames = persons.map { l -> l.associate { it.id to it.name } }.eager(emptyMap())
     /** personId -> balance. Positive = they owe you, negative = you owe them. */
     val personBalances = txns.map { l -> l.filter { it.personId != 0L }.groupBy { it.personId }.mapValues { e -> e.value.sumOf { it.owed } } }.eager(emptyMap())
@@ -146,7 +136,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val locked = MutableStateFlow(false)
     val settingsTarget = MutableStateFlow<String?>(null)
 
-    init { materialize() }
+    init {
+        materialize()
+        viewModelScope.launch {
+            if (!prefs.defaultHeadsSeededV6.value) {
+                repo.seedDefaultHeads()
+                prefs.setDefaultHeadsSeededV6(true)
+            }
+        }
+    }
 
     fun materialize() { viewModelScope.launch { repo.materializeDue() } }
 
@@ -154,7 +152,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun lookup(m: String): Txn? =
         txns.value.firstOrNull { (it.type == "EXPENSE" || it.type == "INCOME") && it.merchant.trim().equals(m.trim(), ignoreCase = true) }
 
-    private fun firstAcc() = accounts.value.firstOrNull()?.id ?: 0
+    private fun firstAcc() = accounts.value.firstOrNull { it.isDefault && !it.archived }?.id
+        ?: accounts.value.firstOrNull { !it.archived }?.id ?: 0L
 
     fun newDraft(type: String = "EXPENSE") { draft.value = Draft(type = type, accountId = firstAcc()) }
 
@@ -164,7 +163,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             category = t.category, accountId = t.accountId, toAccountId = t.toAccountId ?: 0, tag = t.tag, exclude = t.excludeFromBudget,
             routeFrom = t.routeFrom, routeTo = t.routeTo, items = t.items, personId = t.personId,
             split = if (t.personId == 0L || t.owed == 0.0) "TAG" else if (t.owed >= t.amount - 0.005) "FULL" else "SPLIT",
-            share = if (t.owed > 0) fmtAmt(t.owed) else ""
+            share = if (t.owed > 0) fmtAmt(t.owed) else "",
+            createdAt = t.createdAt
         )
     }
 
@@ -191,6 +191,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun delete(t: Txn) = viewModelScope.launch { repo.delete(t) }
     fun restore(t: Txn) = viewModelScope.launch { repo.restore(t) }
+    fun restoreDeleted(item: DeletedTxn) = viewModelScope.launch { repo.restoreDeleted(item) }
+    fun deleteDeletedForever(id: Long) = viewModelScope.launch { repo.deleteDeletedForever(id) }
+    fun restoreDefaultHeads() = viewModelScope.launch {
+        repo.seedDefaultHeads(); prefs.setDefaultHeadsSeededV6(true)
+    }
     fun saveAccount(a: Account) = viewModelScope.launch { repo.saveAccount(a) }
     fun deleteAccount(id: Long) = viewModelScope.launch { repo.deleteAccount(id) }
     fun setBudget(name: String, amount: Double) = viewModelScope.launch { repo.setBudget(name, amount) }
@@ -218,17 +223,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(false)
     }
 
+    suspend fun previewBackup(uri: Uri, passphrase: String?): BackupPreview =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val txt = app.contentResolver.openInputStream(uri)!!.use { readTextBounded(it) }
+            BackupManager.preview(txt, passphrase)
+        }
+
     fun restoreBackup(uri: Uri, passphrase: String?, done: (String) -> Unit) = viewModelScope.launch {
         val r = runCatching {
             val app = getApplication<Application>()
             val txt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 app.contentResolver.openInputStream(uri)!!.use { readTextBounded(it) }
             }
+            // Always leave an app-private snapshot first. If a backup folder and passphrase
+            // are configured, also save an encrypted copy there. Stop if either required
+            // write fails, so a restore never happens without a recovery path.
+            if (!BackupManager.makeSafetyCopy(app)) {
+                throw IllegalStateException("Could not save a safety copy. Restore cancelled.")
+            }
+            if (BackupManager.backupToFolder(app) == BackupManager.BackupStatus.FAILED) {
+                throw IllegalStateException("Encrypted safety backup failed. Restore cancelled.")
+            }
             BackupManager.restore(AppDatabase.get(app), txt, passphrase)
         }
         done(r.fold(
             { "Restored $it transactions" },
-            { "Restore failed: check the backup file and passphrase" }
+            { "Restore failed: ${it.message ?: "check the backup file and passphrase"}" }
         ))
     }
 

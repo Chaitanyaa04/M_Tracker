@@ -124,6 +124,22 @@ object ReminderNotifier {
             .setContentIntent(activityPi(c, 8003, null)).build())
     }
 
+    /** Failure notice for the daily encrypted backup worker. No financial data is shown. */
+    @SuppressLint("MissingPermission")
+    fun backupFailed(c: Context) {
+        ensureChannels(c)
+        val nm = NotificationManagerCompat.from(c)
+        if (!nm.areNotificationsEnabled()) return
+        nm.notify(7, NotificationCompat.Builder(c, CH_UPDATE)
+            .setSmallIcon(R.drawable.ic_stat_rupee)
+            .setContentTitle("Backup did not finish")
+            .setContentText("Check the backup folder or passphrase in Settings → Backup & export.")
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setAutoCancel(true)
+            .setContentIntent(activityPi(c, 8004, null) { putExtra(Extras.OPEN, "data") })
+            .build())
+    }
+
     @SuppressLint("MissingPermission")
     private fun post(c: Context, pid: Long, pkg: String, label: String, accountId: Long, amount: Double?, merchant: String?, last: Txn?) {
         ensureChannels(c)

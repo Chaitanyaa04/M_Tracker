@@ -21,9 +21,22 @@ val DEFAULT_INCOME_CATEGORIES = listOf(
     "Salary", "Stipend", "Pocket Money", "Freelance", "Refunds", "Cashback", "Interest", "Dividends", "Rent Received", "Gifts", "Other"
 )
 
+/** Used in v1->2, before the icon column exists. */
 private fun seedCategories(db: SupportSQLiteDatabase) {
     DEFAULT_EXPENSE_CATEGORIES.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'EXPENSE')", arrayOf<Any>(it)) }
     DEFAULT_INCOME_CATEGORIES.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'INCOME')", arrayOf<Any>(it)) }
+}
+
+/** Used from v6 onward: adds heads and fills icons only where the user has not chosen one. */
+private fun seedCategoriesWithIcons(db: SupportSQLiteDatabase) {
+    DEFAULT_EXPENSE_CATEGORIES.forEach { name ->
+        db.execSQL("INSERT OR IGNORE INTO categories(name,kind,icon) VALUES(?, 'EXPENSE', ?)", arrayOf<Any>(name, defaultHeadIcon(name, "EXPENSE")))
+        db.execSQL("UPDATE categories SET icon=? WHERE name=? AND kind='EXPENSE' AND icon=''", arrayOf<Any>(defaultHeadIcon(name, "EXPENSE"), name))
+    }
+    DEFAULT_INCOME_CATEGORIES.forEach { name ->
+        db.execSQL("INSERT OR IGNORE INTO categories(name,kind,icon) VALUES(?, 'INCOME', ?)", arrayOf<Any>(name, defaultHeadIcon(name, "INCOME")))
+        db.execSQL("UPDATE categories SET icon=? WHERE name=? AND kind='INCOME' AND icon=''", arrayOf<Any>(defaultHeadIcon(name, "INCOME"), name))
+    }
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -39,13 +52,11 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
 }
 
 /** v3: account card colours, transaction creation time (for time-of-day suggestions), head icons. */
-/** v5: person details (relation, phone, note) and the larger set of well-known heads. */
-val MIGRATION_4_5 = object : Migration(4, 5) {
+val MIGRATION_2_3 = object : Migration(2, 3) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE persons ADD COLUMN relation TEXT NOT NULL DEFAULT ''")
-        db.execSQL("ALTER TABLE persons ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
-        db.execSQL("ALTER TABLE persons ADD COLUMN note TEXT NOT NULL DEFAULT ''")
-        seedCategories(db)
+        db.execSQL("ALTER TABLE accounts ADD COLUMN color INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE transactions ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT ''")
     }
 }
 
@@ -61,17 +72,36 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
-val MIGRATION_2_3 = object : Migration(2, 3) {
+/** v5: person details and the larger set of well-known heads. */
+val MIGRATION_4_5 = object : Migration(4, 5) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE accounts ADD COLUMN color INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE transactions ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
-        db.execSQL("ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE persons ADD COLUMN relation TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE persons ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE persons ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        seedCategories(db)
+    }
+}
+
+/**
+ * v6: recycle bin, local change history, account archive/default flags,
+ * predefined-head repair with icons, and removal of Portfolio accounts.
+ * Existing ASSET accounts are converted to BANK so no transaction is lost.
+ */
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE accounts ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE accounts ADD COLUMN isDefault INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("UPDATE accounts SET type='BANK' WHERE type='ASSET'")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `deleted_txns` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `amount` REAL NOT NULL, `merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `date` INTEGER NOT NULL, `category` TEXT NOT NULL, `accountId` INTEGER NOT NULL, `toAccountId` INTEGER, `tag` TEXT NOT NULL, `excludeFromBudget` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `personId` INTEGER NOT NULL, `owed` REAL NOT NULL, `routeFrom` TEXT NOT NULL, `routeTo` TEXT NOT NULL, `items` TEXT NOT NULL, `deletedAt` INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `change_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `entity` TEXT NOT NULL, `entityId` INTEGER NOT NULL, `action` TEXT NOT NULL, `payload` TEXT NOT NULL, `changedAt` INTEGER NOT NULL)")
+        seedCategoriesWithIcons(db)
     }
 }
 
 @Database(
-    entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class, Category::class, DayMark::class, Person::class],
-    version = 5, exportSchema = false
+    entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class,
+        Category::class, DayMark::class, Person::class, DeletedTxn::class, ChangeHistory::class],
+    version = 6, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): LedgerDao
@@ -81,12 +111,12 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(c: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(c.applicationContext, AppDatabase::class.java, "ledger.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
-                        db.execSQL("INSERT INTO accounts(name,type,openingBalance,color) VALUES('Cash','CASH',0.0,2)")
-                        db.execSQL("INSERT INTO accounts(name,type,openingBalance,color) VALUES('Bank Account','BANK',0.0,0)")
-                        seedCategories(db)
+                        db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Cash','CASH',0.0,2,0,1)")
+                        db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Bank Account','BANK',0.0,0,0,0)")
+                        seedCategoriesWithIcons(db)
                     }
                 })
                 .build().also { inst = it }

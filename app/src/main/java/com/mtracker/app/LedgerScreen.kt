@@ -50,6 +50,7 @@ fun LedgerScreen(
     val streak by vm.streak.collectAsState()
     val budgets by vm.budgets.collectAsState()
     val people by vm.peopleNames.collectAsState()
+    val showDaily by vm.prefs.showDailyCard.collectAsState()
     val names = remember(accs) { accs.associate { it.id to it.name } }
     var offset by rememberSaveable { mutableIntStateOf(0) }
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -92,7 +93,7 @@ fun LedgerScreen(
                     Cap(if (searching) "Close" else "Search", Modifier.clickable { searching = !searching; if (!searching) query = "" }.padding(8.dp), color = L.text)
                 }
                 Spacer(Modifier.height(10.dp))
-                if (offset == 0 && safeToday != null && !searching) {
+                if (offset == 0 && showDaily && safeToday != null && !searching) {
                     val remaining = safeToday - spentToday
                     HeroCard(remaining, safeToday, spentToday, daysLeft, overall?.let { maxOf(0.0, it - spentBefore - spentToday) })
                     Spacer(Modifier.height(12.dp))
@@ -103,8 +104,10 @@ fun LedgerScreen(
                     Num(inrS(out - inc), size = 52.sp, weight = FontWeight.Light)
                     Spacer(Modifier.height(4.dp))
                     Num("Out ${inr(out)}  ·  In ${inr(inc)}", size = 13.sp, color = L.muted)
-                    if (offset == 0 && overall == null && dailyCap == null && !searching)
+                    if (offset == 0 && !searching && overall == null && dailyCap == null)
                         Text("Set a daily or monthly limit in Plan to see what’s safe to spend today.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                    if (offset == 0 && !searching && !showDaily && (overall != null || dailyCap != null))
+                        Text("Daily card hidden. Turn it on in Settings → Appearance.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
                 }
                 if (offset == 0) {
                     Spacer(Modifier.height(16.dp))

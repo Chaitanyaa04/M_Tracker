@@ -17,9 +17,30 @@ interface LedgerDao {
     @Query("SELECT * FROM transactions")
     suspend fun allTxns(): List<Txn>
 
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    suspend fun txnById(id: Long): Txn?
+
     @Insert suspend fun insert(t: Txn): Long
     @Update suspend fun update(t: Txn)
     @Delete suspend fun delete(t: Txn)
+
+    @Query("SELECT * FROM deleted_txns ORDER BY deletedAt DESC")
+    fun deletedTxns(): Flow<List<DeletedTxn>>
+
+    @Query("SELECT * FROM deleted_txns")
+    suspend fun allDeletedTxns(): List<DeletedTxn>
+
+    @Insert suspend fun insertDeletedTxn(t: DeletedTxn): Long
+    @Query("DELETE FROM deleted_txns WHERE id = :id") suspend fun deleteDeletedTxn(id: Long)
+    @Query("DELETE FROM deleted_txns") suspend fun clearDeletedTxns()
+
+    @Query("SELECT * FROM change_history ORDER BY changedAt DESC")
+    fun changeHistory(): Flow<List<ChangeHistory>>
+
+    @Query("SELECT * FROM change_history")
+    suspend fun allChangeHistory(): List<ChangeHistory>
+
+    @Insert suspend fun insertChange(h: ChangeHistory)
 
     @Query("SELECT * FROM accounts ORDER BY id")
     fun accounts(): Flow<List<Account>>
@@ -29,6 +50,9 @@ interface LedgerDao {
 
     @Insert suspend fun insertAccount(a: Account): Long
     @Update suspend fun updateAccount(a: Account)
+    @Query("UPDATE accounts SET isDefault = 0") suspend fun clearDefaultAccount()
+    @Query("UPDATE accounts SET archived = 1, isDefault = 0 WHERE id = :id") suspend fun archiveAccount(id: Long)
+    @Query("UPDATE accounts SET archived = 0 WHERE id = :id") suspend fun unarchiveAccount(id: Long)
 
     @Query("DELETE FROM accounts WHERE id = :id")
     suspend fun deleteAccount(id: Long)
@@ -48,7 +72,9 @@ interface LedgerDao {
     @Query("SELECT * FROM pending ORDER BY time DESC") fun pending(): Flow<List<Pending>>
     @Insert suspend fun insertPending(p: Pending): Long
     @Query("DELETE FROM pending WHERE id = :id") suspend fun deletePending(id: Long)
+    @Query("DELETE FROM pending WHERE accountId = :id") suspend fun deletePendingOfAccount(id: Long)
     @Query("SELECT * FROM pending WHERE id = :id") suspend fun pendingById(id: Long): Pending?
+    @Query("SELECT * FROM pending") suspend fun allPending(): List<Pending>
     @Query("SELECT COUNT(*) FROM pending") suspend fun pendingCount(): Int
 
     // recurring
@@ -66,6 +92,7 @@ interface LedgerDao {
 
     // streak helpers
     @Query("SELECT * FROM daymarks") fun dayMarks(): Flow<List<DayMark>>
+    @Query("SELECT * FROM daymarks") suspend fun allDayMarks(): List<DayMark>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertMark(m: DayMark)
     @Query("SELECT COUNT(*) FROM transactions WHERE date = :d") suspend fun countOn(d: Long): Int
     @Query("SELECT COUNT(*) FROM daymarks WHERE date = :d") suspend fun markOn(d: Long): Int
@@ -78,6 +105,10 @@ interface LedgerDao {
     @Query("DELETE FROM budgets") suspend fun clearBudgets()
     @Query("DELETE FROM recurring") suspend fun clearRecurring()
     @Query("DELETE FROM categories") suspend fun clearCategories()
+    @Query("DELETE FROM pending") suspend fun clearPending()
+    @Query("DELETE FROM daymarks") suspend fun clearDayMarks()
+    @Query("DELETE FROM deleted_txns") suspend fun clearDeletedTxnsAll()
+    @Query("DELETE FROM change_history") suspend fun clearHistory()
 
     // people
     @Query("SELECT * FROM persons ORDER BY name COLLATE NOCASE") fun persons(): Flow<List<Person>>

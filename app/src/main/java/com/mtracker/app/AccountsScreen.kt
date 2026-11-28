@@ -40,16 +40,24 @@ import kotlin.math.abs
 private fun typeName(t: String) = when (t) {
     "CASH" -> "Cash"
     "CARD" -> "Credit card"
-    "ASSET" -> "Portfolio"
-    else -> "Bank"
+    "UPI" -> "UPI"
+    "WALLET" -> "Wallet"
+    "BANK" -> "Bank account"
+    else -> t.lowercase().replaceFirstChar { it.uppercase() }
 }
 
-private fun delta(t: Txn, id: Long): Double = when (t.type) {
-    "INCOME", "PERSON_IN" -> t.amount
-    "EXPENSE", "PERSON_OUT" -> -t.amount
-    "PERSON_ADJ" -> 0.0
-    else -> if (t.accountId == id) -t.amount else t.amount
+private val ACCOUNT_TYPES = listOf(
+    "Bank account" to "BANK", "Cash" to "CASH", "UPI" to "UPI",
+    "Wallet" to "WALLET", "Credit card" to "CARD", "Custom…" to "CUSTOM"
+)
+
+/** Custom labels are stored as short uppercase tokens so backups stay portable and safe to parse. */
+private fun customAccountType(raw: String): String {
+    val s = raw.trim().uppercase().replace(Regex("[^A-Z0-9]"), "_").trim('_')
+    return if (s.length < 3) "OTHER" else s.take(24)
 }
+
+private fun delta(t: Txn, id: Long): Double = LedgerMath.delta(t, id)
 
 /** Balance of one account over the last [days] days, for the card sparkline. */
 fun accountSeries(a: Account, txns: List<Txn>, days: Int = 30): List<Double> {
@@ -99,7 +107,7 @@ fun AccountCard(a: Account, balance: Double, series: List<Double>, hide: Boolean
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
-                    Cap(if (a.type == "CARD" && balance < 0) "Owed" else if (a.type == "ASSET") "Value" else "Balance", color = white.copy(alpha = 0.6f))
+                    Cap(if (a.type == "CARD" && balance < 0) "Owed" else "Balance", color = white.copy(alpha = 0.6f))
                     Spacer(Modifier.height(4.dp))
                     val txt = if (hide) "••••••" else if (a.type == "CARD" && balance < 0) inr(balance) else inrS(balance)
                     Num(txt, size = 30.sp, color = white, weight = FontWeight.Light)
@@ -131,20 +139,34 @@ private fun Stat(label: String, value: String) {
 
 @Composable
 fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = Modifier) {
-    val accs by vm.accounts.collectAsState()
+    val allAccs by vm.accounts.collectAsState()
     val bal by vm.balances.collectAsState()
     val txns by vm.txns.collectAsState()
     val hide by vm.prefs.hideBalances.collectAsState()
+    val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     var editing by remember { mutableStateOf<Account?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var deleteCandidate by remember { mutableStateOf<Account?>(null) }
+    var selectedId by remember { mutableLongStateOf(-1L) }
     val pager = rememberPagerState { accs.size + 1 }
+    // Track the account, not its page number, so archiving one card cannot silently
+    // make Edit / Recent point at a different account.
+    LaunchedEffect(accs) {
+        if (selectedId == -1L) selectedId = accs.firstOrNull()?.id ?: 0L
+        val target = if (selectedId == 0L) accs.size else accs.indexOfFirst { it.id == selectedId }.let { if (it < 0) 0 else it }
+        if (target in 0 until pager.pageCount && pager.currentPage != target) pager.scrollToPage(target)
+    }
+    LaunchedEffect(pager.currentPage) {
+        selectedId = accs.getOrNull(pager.currentPage)?.id ?: 0L
+    }
     fun m(s: String) = if (hide) "••••••" else s
     fun total(type: String) = accs.filter { it.type == type }.sumOf { bal[it.id] ?: 0.0 }
     val net = accs.sumOf { bal[it.id] ?: 0.0 }
     val cashBank = total("BANK") + total("CASH")
     val owed = -total("CARD")
     val names = remember(accs) { accs.associate { it.id to it.name } }
-    val cur = accs.getOrNull(pager.currentPage)
+    val cur = accs.firstOrNull { it.id == selectedId }
+    val currentIndex = if (selectedId == 0L) accs.size else accs.indexOfFirst { it.id == selectedId }.let { if (it < 0) 0 else it }
 
     LazyColumn(modifier.fillMaxSize()) {
         item {
@@ -162,7 +184,7 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
                     Stat("Cash & bank", m(inrS(cashBank)))
                     Stat("Cards owed", m(inr(owed)))
-                    Stat("Portfolio", m(inrS(total("ASSET"))))
+                    Stat("UPI & wallets", m(inrS(total("UPI") + total("WALLET"))))
                 }
             }
         }
@@ -175,7 +197,7 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
             }
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.Center) {
                 repeat(accs.size + 1) { i ->
-                    Box(Modifier.padding(3.dp).size(if (i == pager.currentPage) 7.dp else 5.dp).background(if (i == pager.currentPage) L.text else L.border, CircleShape))
+                    Box(Modifier.padding(3.dp).size(if (i == currentIndex) 7.dp else 5.dp).background(if (i == currentIndex) L.text else L.border, CircleShape))
                 }
             }
             Row(Modifier.padding(24.dp, 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -213,35 +235,53 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
 
     if (adding) AccountDialog(null, { adding = false }, { vm.saveAccount(it); adding = false }, {})
     editing?.let { a ->
-        AccountDialog(a, { editing = null }, { vm.saveAccount(it); editing = null }, { vm.deleteAccount(a.id); editing = null })
+        AccountDialog(a, { editing = null }, { vm.saveAccount(it); editing = null }, { deleteCandidate = a; editing = null })
     }
+    deleteCandidate?.let { a ->
+        ConfirmDeleteAccountDialog(
+            a,
+            { vm.deleteAccount(a.id); deleteCandidate = null },
+            { deleteCandidate = null }
+        )
+    }
+}
+
+@Composable
+fun ConfirmDeleteAccountDialog(account: Account, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = L.surface,
+        title = { Cap("Delete ${account.name}?", color = L.text) },
+        text = { Text("Its transactions are moved to the Recycle Bin, so they can be restored later. The account itself is archived and hidden from pickers. Repeating entries and pending prompts for this account will be removed.", color = L.muted, fontSize = 13.sp) },
+        confirmButton = { TextButton(onConfirm) { Text("Delete", color = L.red) } },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
 fun AccountDialog(account: Account?, onDismiss: () -> Unit, onSave: (Account) -> Unit, onDelete: () -> Unit) {
     var name by remember { mutableStateOf(account?.name ?: "") }
     var type by remember { mutableStateOf(account?.type ?: "BANK") }
+    var customType by remember {
+        mutableStateOf(account?.type?.takeIf { t -> ACCOUNT_TYPES.none { it.second == t } } ?: "")
+    }
     var color by remember { mutableIntStateOf(account?.color ?: ((name.length + 3) % CARD_COLORS.size)) }
+    var archived by remember { mutableStateOf(account?.archived ?: false) }
+    var isDefault by remember { mutableStateOf(account?.isDefault ?: false) }
     var openingText by remember {
         mutableStateOf(account?.let { fmtAmt(if (it.type == "CARD") -it.openingBalance else it.openingBalance) } ?: "")
     }
-    val openLabel = when (type) {
-        "CARD" -> "Amount owed (INR)"
-        "ASSET" -> "Current value (INR)"
-        else -> "Opening balance (INR)"
-    }
+    val openLabel = if (type == "CARD") "Amount owed (INR)" else "Opening balance (INR)"
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(10.dp),
         title = { Cap(if (account == null) "New account" else "Edit account", color = L.text) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Field("Name", name, { name = it })
-                Picker(
-                    "Type", typeName(type),
-                    listOf("Bank account" to "BANK", "Cash" to "CASH", "Credit card" to "CARD", "Portfolio asset" to "ASSET"),
-                    { type = it }
-                )
+                Picker("Type", typeName(type), ACCOUNT_TYPES, { type = it })
+                if (type == "CUSTOM") Field("Custom type (e.g. Gold)", customType, { customType = it })
                 Field(openLabel, openingText, { openingText = it }, kb = KeyboardType.Decimal)
+                SwitchRow("Use as default account", isDefault) { isDefault = it }
+                SwitchRow("Archive (hide from pickers)", archived) { archived = it }
                 Cap("Card colour")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     CARD_COLORS.forEachIndexed { i, c ->
@@ -252,13 +292,16 @@ fun AccountDialog(account: Account?, onDismiss: () -> Unit, onSave: (Account) ->
                         )
                     }
                 }
-                if (account != null) Text("Deleting an account also removes its transactions.", color = L.muted, fontSize = 12.sp)
+                if (account != null) Text("Deleting archives the account and moves its transactions to the Recycle Bin.", color = L.muted, fontSize = 12.sp)
             }
         },
         confirmButton = {
             TextButton({
                 val v = openingText.toDoubleOrNull() ?: 0.0
-                if (name.isNotBlank()) onSave(Account(account?.id ?: 0, name.trim(), type, if (type == "CARD") -abs(v) else v, color))
+                if (name.isNotBlank()) {
+                    val savedType = if (type == "CUSTOM") customAccountType(customType) else type
+                    onSave(Account(account?.id ?: 0, name.trim(), savedType, if (type == "CARD") -abs(v) else v, color, archived, isDefault && !archived))
+                }
             }) { Text("Save") }
         },
         dismissButton = {

@@ -56,8 +56,12 @@ fun looksLikePayment(label: String, pkg: String) =
     pkg in KNOWN_PAYMENT_PKGS || PAY_WORDS.any { label.contains(it, true) || pkg.contains(it, true) }
 
 fun defaultAccount(label: String, accs: List<Account>): Long {
+    val active = accs.filter { !it.archived }
     val w = label.trim().split(" ").first()
-    return if (w.length < 3) 0L else accs.firstOrNull { it.name.contains(w, ignoreCase = true) }?.id ?: 0L
+    return if (w.length < 3) 0L
+    else active.firstOrNull { it.isDefault }?.id
+        ?: active.firstOrNull { it.name.contains(w, ignoreCase = true) }?.id
+        ?: active.firstOrNull()?.id ?: 0L
 }
 
 fun openAppInfo(c: Context) {
@@ -82,7 +86,8 @@ fun LockScreen(onUnlock: () -> Unit) {
 fun Onboarding(vm: MainViewModel, onDone: () -> Unit) {
     val ctx = LocalContext.current
     var step by rememberSaveable { mutableIntStateOf(0) }
-    val accs by vm.accounts.collectAsState()
+    val allAccs by vm.accounts.collectAsState()
+    val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     val bal by vm.balances.collectAsState()
     val apps by vm.prefs.apps.collectAsState()
     val hour by vm.prefs.checkinHour.collectAsState()
@@ -92,6 +97,7 @@ fun Onboarding(vm: MainViewModel, onDone: () -> Unit) {
     val notif = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     var adding by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Account?>(null) }
+    var deleteCandidate by remember { mutableStateOf<Account?>(null) }
     var suggested by remember { mutableStateOf(listOf<Pair<String, String>>()) }
     LaunchedEffect(Unit) {
         suggested = withContext(Dispatchers.IO) { loadLaunchables(ctx).filter { looksLikePayment(it.first, it.second) }.take(8) }
@@ -176,6 +182,13 @@ fun Onboarding(vm: MainViewModel, onDone: () -> Unit) {
 
     if (adding) AccountDialog(null, { adding = false }, { vm.saveAccount(it); adding = false }, {})
     editing?.let { a ->
-        AccountDialog(a, { editing = null }, { vm.saveAccount(it); editing = null }, { vm.deleteAccount(a.id); editing = null })
+        AccountDialog(a, { editing = null }, { vm.saveAccount(it); editing = null }, { deleteCandidate = a; editing = null })
+    }
+    deleteCandidate?.let { a ->
+        ConfirmDeleteAccountDialog(
+            a,
+            { vm.deleteAccount(a.id); deleteCandidate = null },
+            { deleteCandidate = null }
+        )
     }
 }

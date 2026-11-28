@@ -194,7 +194,10 @@ fun AddEditTransactionSheet(
     val zone = ZoneId.systemDefault()
     val focus = remember { FocusRequester() }
 
-    LaunchedEffect(accounts) { if (accId == 0L && accounts.isNotEmpty()) accId = accounts.first().id }
+    // Keep an already-selected archived account visible while editing an old transaction,
+    // so saving a note never silently moves money to a different account.
+    val activeAccounts = accounts.filter { !it.archived || it.id == accId || it.id == toId }
+    LaunchedEffect(activeAccounts) { if (accId == 0L && activeAccounts.isNotEmpty()) accId = activeAccounts.first().id }
     LaunchedEffect(Unit) {
         if (isNew && d.merchant.isNotBlank()) lookup(d.merchant)?.let { if (it.type == type) { category = it.category; if (tag.isBlank()) tag = it.tag } }
         if (isNew && d.amount.isBlank()) { delay(300); runCatching { focus.requestFocus() } }   // opens the normal number pad
@@ -213,8 +216,9 @@ fun AddEditTransactionSheet(
     val quick = ((if (category in headNames) listOf(category) else emptyList()) + baseQuick).distinct().take(4)
     val topMerchants = remember(merchantNames) { merchantNames.take(12) }
     val merchantRow = ((if (merchant.isNotBlank()) listOf(merchant.trim()) else emptyList()) + topMerchants).distinct().take(4)
-    val accOptions = accounts.map { it.name to it.id }
-    val accName = { id: Long -> accounts.firstOrNull { it.id == id }?.name ?: "Select" }
+    fun accLabel(a: Account) = if (a.archived) "${a.name} (archived)" else a.name
+    val accOptions = activeAccounts.map { accLabel(it) to it.id }
+    val accName = { id: Long -> activeAccounts.firstOrNull { it.id == id }?.let { a -> accLabel(a) } ?: "Select" }
     val iconKey = (LocalHeadIcons.current[category])?.takeIf { it in HEAD_ICON_MAP } ?: guessIconKey(category)
     val showTrip = type == "EXPENSE" && iconKey in setOf("car", "bus", "flight")
 
@@ -465,7 +469,8 @@ fun AddEditTransactionSheet(
                                 tag = tag.trim(), excludeFromBudget = exclude && type == "EXPENSE",
                                 personId = if (type == "EXPENSE") personId else 0, owed = round2(owed),
                                 routeFrom = if (showTrip) routeFrom.trim() else "", routeTo = if (showTrip) routeTo.trim() else "",
-                                items = if (itemized && type == "EXPENSE") itemsJson(items, adjs, subtotal) else ""
+                                items = if (itemized && type == "EXPENSE") itemsJson(items, adjs, subtotal) else "",
+                                createdAt = d.createdAt
                             ),
                             if (isNew) repeat else "NEVER"
                         )

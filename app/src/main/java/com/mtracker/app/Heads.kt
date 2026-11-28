@@ -348,15 +348,17 @@ fun NewHeadDialog(defaultKind: String, onCreate: (String, String, String) -> Uni
                     Chip("Income", kind == "INCOME") { kind = "INCOME" }
                 }
                 Cap("Icon")
-                HEAD_ICON_KEYS.chunked(6).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { (k, v) ->
-                            Box(
-                                Modifier.size(44.dp).clip(shape)
-                                    .border(if (k == key) 2.dp else 1.dp, if (k == key) L.text else L.border, shape)
-                                    .clickable { icon = k },
-                                contentAlignment = Alignment.Center
-                            ) { Icon(v, null, tint = L.text, modifier = Modifier.size(22.dp)) }
+                Column(Modifier.horizontalScroll(rememberScrollState())) {
+                    HEAD_ICON_KEYS.chunked(6).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { (k, v) ->
+                                Box(
+                                    Modifier.size(44.dp).clip(shape)
+                                        .border(if (k == key) 2.dp else 1.dp, if (k == key) L.text else L.border, shape)
+                                        .clickable { icon = k },
+                                    contentAlignment = Alignment.Center
+                                ) { Icon(v, null, tint = L.text, modifier = Modifier.size(22.dp)) }
+                            }
                         }
                     }
                 }

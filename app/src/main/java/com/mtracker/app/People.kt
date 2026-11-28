@@ -46,7 +46,8 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     val people by vm.persons.collectAsState()
     val bal by vm.personBalances.collectAsState()
     val txns by vm.txns.collectAsState()
-    val accs by vm.accounts.collectAsState()
+    val allAccs by vm.accounts.collectAsState()
+    val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     val hide by vm.prefs.hideBalances.collectAsState()
     var openId by rememberSaveable { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }

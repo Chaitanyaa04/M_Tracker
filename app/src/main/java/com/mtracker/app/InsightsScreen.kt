@@ -87,7 +87,7 @@ fun InsightsScreen(vm: MainViewModel, modifier: Modifier = Modifier) {
         ex.filter { it.tag.isNotBlank() }.groupBy { "#" + it.tag.trim() }
             .map { it.key to it.value.sumOf { t -> t.myAmount } }.sortedByDescending { it.second }
     }
-    val series = remember(txns, accs, lo, hi) { trendSeries(txns, accs, lo, hi) }
+    val series = remember(txns, accs, lo, hi) { trendSeries(txns, accs.filter { !it.archived }, lo, hi) }
     val marks by vm.dayMarks.collectAsState()
     val spendByDay = remember(txns) { txns.filter { it.type == "EXPENSE" }.groupBy { it.date }.mapValues { e -> e.value.sumOf { it.myAmount } } }
     val logged = remember(txns, marks) { txns.map { it.date }.toSet() + marks.map { it.date }.toSet() }

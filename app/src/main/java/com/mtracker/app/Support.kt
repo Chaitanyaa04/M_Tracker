@@ -90,7 +90,7 @@ private object LocalKeyWrap {
 /** Local settings (SharedPreferences). apps maps packageName -> default accountId (0 = none). */
 class AppPrefs private constructor(c: Context) {
     private val sp = c.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    val theme = MutableStateFlow(sp.getString("theme", "OLED") ?: "OLED")        // OLED | PAPER | SYSTEM
+    val theme = MutableStateFlow(sp.getString("theme", "OLED") ?: "OLED")        // OLED | PAPER | SOFT_DARK | SYSTEM
     val mode = MutableStateFlow(sp.getString("mode", "A") ?: "A")                // A = app launch, B = notification text
     val delaySec = MutableStateFlow(sp.getInt("delay", 30))
     val apps = MutableStateFlow(load())
@@ -113,6 +113,8 @@ class AppPrefs private constructor(c: Context) {
     val latestTag = MutableStateFlow(sp.getString("latesttag", "") ?: "")
     val lastUpdateCheck = MutableStateFlow(sp.getLong("lastupd", 0L))
     val notifiedTag = MutableStateFlow(sp.getString("notifiedtag", "") ?: "")
+    val defaultHeadsSeededV6 = MutableStateFlow(sp.getBoolean("headsseedv6", false))
+    val showDailyCard = MutableStateFlow(sp.getBoolean("dailycard", false))   // off by default
 
     /** Per-install random secret used to verify internal notification PendingIntents arriving at exported MainActivity. */
     @Volatile private var intentTokenCache: String? = null
@@ -216,6 +218,8 @@ class AppPrefs private constructor(c: Context) {
     fun setLatestTag(v: String) { latestTag.value = v; sp.edit().putString("latesttag", v).apply() }
     fun setLastUpdateCheck(v: Long) { lastUpdateCheck.value = v; sp.edit().putLong("lastupd", v).apply() }
     fun setNotifiedTag(v: String) { notifiedTag.value = v; sp.edit().putString("notifiedtag", v).apply() }
+    fun setDefaultHeadsSeededV6(v: Boolean) { defaultHeadsSeededV6.value = v; sp.edit().putBoolean("headsseedv6", v).apply() }
+    fun setShowDailyCard(v: Boolean) { showDailyCard.value = v; sp.edit().putBoolean("dailycard", v).apply() }
     /** Every "Wrong call" makes that app need a longer visit before we ask again. */
     fun wrongCount(pkg: String): Int = (sp.getString("wrong", "") ?: "").split(";").firstOrNull { it.startsWith("$pkg=") }?.substringAfter("=")?.toIntOrNull() ?: 0
     fun bumpWrong(pkg: String) {
