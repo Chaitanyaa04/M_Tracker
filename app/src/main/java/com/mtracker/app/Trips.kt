@@ -477,10 +477,15 @@ private fun TripExpenseDialog(
                 Field("Amount (INR)", amount, { amount = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, kb = KeyboardType.Decimal)
                 val payerOptions = (listOf("You" to 0L) + memberIds.filter { it != 0L }
                     .map { tripWho(people, it) to it })
-                Picker("Who paid", payerOptions.firstOrNull { it.second == payer }?.first ?: "You", payerOptions) { id ->
-                    payer = id
-                    if (id !in shares) shares = (shares + id).toSet()
-                }
+                Picker(
+                    label = "Who paid",
+                    value = payerOptions.firstOrNull { it.second == payer }?.first ?: "You",
+                    options = payerOptions,
+                    onPick = { id ->
+                        payer = id
+                        if (id !in shares) shares = (shares + id).toSet()
+                    }
+                )
                 Cap("Who shares it?")
                 if (memberIds.isEmpty()) Text("Add people to the trip first.", color = L.muted, fontSize = 13.sp)
                 else {
