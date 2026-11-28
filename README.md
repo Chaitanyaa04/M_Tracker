@@ -53,10 +53,14 @@ System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available 
 ## Data safety
 
 - Backups are encrypted locally with AES-256-GCM using your passphrase and include the Recycle Bin and change history. Restore previews and validates the file before asking for confirmation, and makes an app-private safety snapshot first. If a backup folder and passphrase are configured, an encrypted copy is saved there too.
-- Deleted transactions go to a local Recycle Bin. Removing an account archives it and moves its transactions there; restoring recreates a missing account if needed.
+- Deleted transactions go to a local Recycle Bin. Removing an account archives it and moves its ordinary transactions there, while settlement records stay so settled debts keep their money trail; restoring recreates a missing account if needed.
 - Settings → Change history shows a small local log of edits, deletions and restores.
 - Accounts support Bank, Cash, UPI, Wallet, Credit card and short custom types. Archived accounts are hidden from pickers but their past transactions are kept.
 
 ## Flavors
 
-The old `standard` / `autofill` flavors were removed. The manual autofill workflow is retained only to explain that removal; use the main build workflow instead.
+The old `standard` / `autofill` flavors were removed. The main build workflow is the only supported build.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for shipped work and the remaining queue.
