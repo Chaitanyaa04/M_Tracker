@@ -58,6 +58,7 @@ fun TripsView(vm: MainViewModel, modifier: Modifier = Modifier) {
         val open = debts.filter { it.tripId == tripId && !it.settled }
         return open.filter { it.toPersonId == 0L }.sumOf { it.amount } to open.filter { it.fromPersonId == 0L }.sumOf { it.amount }
     }
+    @Composable
     fun yourLine(tripId: Long): Pair<String, androidx.compose.ui.graphics.Color> {
         val (gets, owes) = balance(tripId)
         return when {
