@@ -38,7 +38,8 @@ data class BackupPreview(
     val pending: Int,
     val dayMarks: Int,
     val deleted: Int,
-    val history: Int
+    val history: Int,
+    val groups: Int
 )
 
 private data class ParsedBackup(
@@ -52,7 +53,10 @@ private data class ParsedBackup(
     val pending: List<Pending>,
     val dayMarks: List<DayMark>,
     val deleted: List<DeletedTxn>,
-    val history: List<ChangeHistory>
+    val history: List<ChangeHistory>,
+    val groups: List<OccasionGroup>,
+    val groupMembers: List<GroupMember>,
+    val groupDebts: List<GroupDebt>
 )
 
 /** Full-fidelity local backup, including the local Recycle Bin and change history. */
@@ -131,8 +135,9 @@ object BackupManager {
         val cats = d.allCategories(); val recs = d.allRecurring(); val persons = d.allPersons()
         val pendings = d.allPending(); val marks = d.allDayMarks()
         val deleted = d.allDeletedTxns(); val history = d.allChangeHistory()
+        val groups = d.allGroups(); val groupMembers = d.allGroupMembers(); val groupDebts = d.allGroupDebts()
         JSONObject().apply {
-            put("app", "Arthak"); put("schema", 4); put("exportedAt", System.currentTimeMillis())
+            put("app", "Arthak"); put("schema", 6); put("exportedAt", System.currentTimeMillis())
             put("accounts", JSONArray().also { a -> accs.forEach {
                 a.put(JSONObject().put("id", it.id).put("name", it.name).put("type", it.type)
                     .put("opening", it.openingBalance).put("color", it.color)
@@ -145,7 +150,8 @@ object BackupManager {
                     .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items))
             } })
             put("persons", JSONArray().also { a -> persons.forEach {
-                a.put(JSONObject().put("id", it.id).put("name", it.name).put("rel", it.relation).put("phone", it.phone).put("note", it.note))
+                a.put(JSONObject().put("id", it.id).put("name", it.name).put("rel", it.relation).put("phone", it.phone)
+                    .put("note", it.note).put("photo", it.photoUri))
             } })
             put("budgets", JSONArray().also { a -> budgets.forEach { a.put(JSONObject().put("name", it.name).put("amount", it.amount)) } })
             put("categories", JSONArray().also { a -> cats.forEach {
@@ -173,6 +179,16 @@ object BackupManager {
                 a.put(JSONObject().put("id", it.id).put("entity", it.entity).put("entityId", it.entityId)
                     .put("action", it.action).put("payload", it.payload).put("changedAt", it.changedAt))
             } })
+            put("groups", JSONArray().also { a -> groups.forEach {
+                a.put(JSONObject().put("id", it.id).put("name", it.name).put("note", it.note).put("createdAt", it.createdAt))
+            } })
+            put("groupMembers", JSONArray().also { a -> groupMembers.forEach {
+                a.put(JSONObject().put("group", it.groupId).put("person", it.personId))
+            } })
+            put("groupDebts", JSONArray().also { a -> groupDebts.forEach {
+                a.put(JSONObject().put("id", it.id).put("group", it.groupId).put("from", it.fromPersonId)
+                    .put("to", it.toPersonId).put("amount", it.amount).put("settled", it.settled))
+            } })
         }.toString()
     }
 
@@ -181,7 +197,7 @@ object BackupManager {
         val json = if (isEncrypted(rawJson)) decrypt(rawJson, passphrase.orEmpty()) else rawJson
         val o = JSONObject(json)
         require(o.optString("app") in listOf("Arthak", "M_Tracker")) { "Not an Arthak backup." }
-        require(o.optInt("schema", 2) in 2..4) { "Unsupported backup version." }
+        require(o.optInt("schema", 2) in 2..6) { "Unsupported backup version." }
 
         fun JSONObject.toOrNull(k: String): Long? = if (isNull(k)) null else getLong(k)
         fun JSONObject.doubleOrNull(k: String): Double? = if (isNull(k)) null else getDouble(k)
@@ -205,6 +221,9 @@ object BackupManager {
         val markArr = o.optJSONArray("daymarks") ?: JSONArray()
         val deletedArr = o.optJSONArray("deleted") ?: JSONArray()
         val historyArr = o.optJSONArray("history") ?: JSONArray()
+        val groupArr = o.optJSONArray("groups") ?: JSONArray()
+        val groupMemberArr = o.optJSONArray("groupMembers") ?: JSONArray()
+        val groupDebtArr = o.optJSONArray("groupDebts") ?: JSONArray()
 
         require(accArr.length() in 1..MAX_ACCOUNTS) { "Invalid account count in backup." }
         require(txnArr.length() <= MAX_TXNS) { "Backup exceeds maximum transaction count." }
@@ -212,6 +231,7 @@ object BackupManager {
         require(budgetArr.length() <= MAX_OTHER && catArr.length() <= MAX_OTHER && recArr.length() <= MAX_OTHER &&
             pendingArr.length() <= MAX_OTHER && markArr.length() <= MAX_PERSONS) { "Backup exceeds allowed metadata limits." }
         require(deletedArr.length() <= MAX_TXNS && historyArr.length() <= MAX_HISTORY) { "Backup exceeds local history limits." }
+        require(groupArr.length() <= MAX_OTHER && groupMemberArr.length() <= MAX_TXNS && groupDebtArr.length() <= MAX_TXNS) { "Backup exceeds group limits." }
 
         val accs = (0 until accArr.length()).map { accArr.getJSONObject(it) }.map {
             val name = it.getString("name").trim()
@@ -228,7 +248,12 @@ object BackupManager {
         val persons = (0 until personArr.length()).map { personArr.getJSONObject(it) }.map {
             val name = it.getString("name").trim()
             require(name.isNotEmpty() && name.length <= 100) { "Invalid person name." }
-            Person(it.getLong("id"), name, it.optString("rel", "").take(50), it.optString("phone", "").take(24), it.optString("note", "").take(300))
+            val photo = it.optString("photo", "")
+            require(photo.isEmpty() || (photo.length <= 120 && photo.matches(Regex("[A-Za-z0-9._-]+")) && !photo.contains(".."))) {
+                "Invalid person photo reference."
+            }
+            Person(it.getLong("id"), name, it.optString("rel", "").take(50), it.optString("phone", "").take(24),
+                it.optString("note", "").take(300), photo)
         }
 
         val txns = (0 until txnArr.length()).map { txnArr.getJSONObject(it) }.map {
@@ -237,8 +262,8 @@ object BackupManager {
             val amt = requireFinite(it.getDouble("amount"), "amount")
             require(amt >= 0.0) { "Negative transaction amount." }
             val owed = requireFinite(it.optDouble("owed", 0.0), "owed")
-            require(owed >= 0.0) { "Negative owed amount." }
-            require(type != "EXPENSE" || owed <= amt) { "Owed exceeds expense amount." }
+            require(owed >= 0.0 || (type in setOf("PERSON_IN", "PERSON_ADJ") && owed >= -amt)) { "Invalid owed amount." }
+            require(owed <= amt) { "Owed exceeds transaction amount." }
             val date = it.getLong("date")
             require(date in MIN_EPOCH_MS..MAX_EPOCH_MS) { "Transaction date out of valid range." }
             val accId = it.getLong("account")
@@ -305,8 +330,8 @@ object BackupManager {
             val amt = requireFinite(it.getDouble("amount"), "recycled amount")
             require(amt >= 0.0) { "Negative recycled amount." }
             val owed = requireFinite(it.optDouble("owed", 0.0), "recycled owed")
-            require(owed >= 0.0) { "Negative recycled owed amount." }
-            require(type != "EXPENSE" || owed <= amt) { "Recycled owed exceeds expense amount." }
+            require(owed >= 0.0 || (type in setOf("PERSON_IN", "PERSON_ADJ") && owed >= -amt)) { "Invalid recycled owed amount." }
+            require(owed <= amt) { "Recycled owed exceeds transaction amount." }
             val date = it.getLong("date")
             require(date in MIN_EPOCH_MS..MAX_EPOCH_MS) { "Recycled transaction date out of range." }
             val accId = it.getLong("account")
@@ -333,6 +358,37 @@ object BackupManager {
             ChangeHistory(it.getLong("id"), entity, it.getLong("entityId"), action, it.getString("payload").take(8_000), changedAt)
         }
 
+        val personIds = persons.map { it.id }.toSet()
+        val groups = (0 until groupArr.length()).map { groupArr.getJSONObject(it) }.map {
+            val name = it.getString("name").trim()
+            require(name.isNotEmpty() && name.length <= 80) { "Invalid group name." }
+            val createdAt = it.getLong("createdAt")
+            require(createdAt in MIN_EPOCH_MS..MAX_EPOCH_MS) { "Group date out of range." }
+            OccasionGroup(it.getLong("id"), name, it.optString("note", "").take(300), createdAt)
+        }
+        val groupIds = groups.map { it.id }.toSet()
+        val groupMembers = (0 until groupMemberArr.length()).map { groupMemberArr.getJSONObject(it) }.map {
+            val gid = it.getLong("group")
+            val pid = it.getLong("person")
+            require(gid in groupIds && pid in personIds) { "Group member references a missing row." }
+            GroupMember(gid, pid)
+        }
+        val memberPairs = groupMembers.map { it.groupId to it.personId }.toSet()
+        val groupDebts = (0 until groupDebtArr.length()).map { groupDebtArr.getJSONObject(it) }.map {
+            val gid = it.getLong("group")
+            val from = it.getLong("from")
+            val to = it.getLong("to")
+            require(gid in groupIds) { "Group debt references a missing group." }
+            require(from != to && (from == 0L || from in personIds) && (to == 0L || to in personIds)) {
+                "Group debt references a missing person."
+            }
+            if (from != 0L) require((gid to from) in memberPairs) { "Debtor is not in this group." }
+            if (to != 0L) require((gid to to) in memberPairs) { "Creditor is not in this group." }
+            val amount = requireFinite(it.getDouble("amount"), "group debt amount")
+            require(amount > 0.0 && amount <= 1_000_000_000.0) { "Invalid group debt amount." }
+            GroupDebt(it.getLong("id"), gid, from, to, amount, it.optBoolean("settled", false))
+        }
+
         fun requireUnique(ids: List<Long>, label: String) {
             require(ids.size == ids.toSet().size) { "Duplicate $label id in backup." }
         }
@@ -343,6 +399,9 @@ object BackupManager {
         requireUnique(pending.map { it.id }, "pending")
         requireUnique(deleted.map { it.id }, "recycled transaction")
         requireUnique(history.map { it.id }, "history")
+        requireUnique(groups.map { it.id }, "group")
+        requireUnique(groupDebts.map { it.id }, "group debt")
+        require(groupMembers.map { it.groupId to it.personId }.toSet().size == groupMembers.size) { "Duplicate group member in backup." }
         require(budgets.map { it.name }.toSet().size == budgets.size) { "Duplicate budget name in backup." }
         require(cats.map { it.name to it.kind }.toSet().size == cats.size) { "Duplicate head in backup." }
         require(marks.map { it.date }.toSet().size == marks.size) { "Duplicate day mark in backup." }
@@ -350,7 +409,8 @@ object BackupManager {
             "Transaction id is also used in the recycle bin."
         }
 
-        return ParsedBackup(o.optLong("exportedAt", 0L), accs, txns, persons, budgets, cats, recs, pending, marks, deleted, history)
+        return ParsedBackup(o.optLong("exportedAt", 0L), accs, txns, persons, budgets, cats, recs, pending, marks,
+            deleted, history, groups, groupMembers, groupDebts)
     }
 
     /** Validate and summarise before asking the user to confirm a restore. */
@@ -358,7 +418,7 @@ object BackupManager {
         val b = parse(rawJson, passphrase)
         return BackupPreview(b.exportedAt, b.accounts.size, b.txns.size, b.persons.size,
             b.budgets.size, b.cats.size, b.recs.size, b.pending.size, b.dayMarks.size,
-            b.deleted.size, b.history.size)
+            b.deleted.size, b.history.size, b.groups.size)
     }
 
     /** Replaces everything with the backup's contents. Supports encrypted and legacy plaintext backups. */
@@ -368,6 +428,7 @@ object BackupManager {
         db.withTransaction {
             d.clearTxns(); d.clearPersons(); d.clearRecurring(); d.clearAccounts(); d.clearBudgets()
             d.clearCategories(); d.clearPending(); d.clearDayMarks(); d.clearDeletedTxnsAll(); d.clearHistory()
+            d.clearGroupDebts(); d.clearGroupMembers(); d.clearGroups()
             b.accounts.forEach { d.insertAccount(it) }
             b.txns.forEach { d.insert(it) }
             b.budgets.forEach { d.upsertBudget(it) }
@@ -378,6 +439,9 @@ object BackupManager {
             b.dayMarks.forEach { d.insertMark(it) }
             b.deleted.forEach { d.insertDeletedTxn(it) }
             b.history.forEach { d.insertChange(it) }
+            b.groups.forEach { d.insertGroup(it) }
+            b.groupMembers.forEach { d.insertGroupMember(it) }
+            b.groupDebts.forEach { d.insertGroupDebt(it) }
         }
         b.txns.size
     }

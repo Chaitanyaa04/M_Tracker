@@ -98,10 +98,21 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+/** v7: local person photos and rare occasion groups. */
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE persons ADD COLUMN photoUri TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `occasion_groups` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `group_members` (`groupId` INTEGER NOT NULL, `personId` INTEGER NOT NULL, PRIMARY KEY(`groupId`, `personId`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `group_debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `groupId` INTEGER NOT NULL, `fromPersonId` INTEGER NOT NULL, `toPersonId` INTEGER NOT NULL, `amount` REAL NOT NULL, `settled` INTEGER NOT NULL DEFAULT 0)")
+    }
+}
+
 @Database(
     entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class,
-        Category::class, DayMark::class, Person::class, DeletedTxn::class, ChangeHistory::class],
-    version = 6, exportSchema = false
+        Category::class, DayMark::class, Person::class, DeletedTxn::class, ChangeHistory::class,
+        OccasionGroup::class, GroupMember::class, GroupDebt::class],
+    version = 7, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): LedgerDao
@@ -111,7 +122,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(c: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(c.applicationContext, AppDatabase::class.java, "ledger.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Cash','CASH',0.0,2,0,1)")

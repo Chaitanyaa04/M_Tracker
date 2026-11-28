@@ -1,30 +1,45 @@
 package com.mtracker.app
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
-import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.io.File
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
+import java.util.UUID
 import kotlin.math.abs
 
 private fun balanceText(b: Double) = when {
@@ -33,13 +48,77 @@ private fun balanceText(b: Double) = when {
     else -> "all settled"
 }
 
-@Composable
-private fun Avatar(name: String, size: Int = 44) {
-    val c = headColor(name, L.dark)
-    Box(Modifier.size(size.dp).clip(CircleShape).background(c.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
-        Text(name.trim().take(1).uppercase(), color = c, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Medium)
+private fun shortBalance(b: Double) = when {
+    b > 0.004 -> "gets ${inr(b)}"
+    b < -0.004 -> "owes ${inr(-b)}"
+    else -> "settled"
+}
+
+/** Profile photos are copied into app-private storage and referenced by file name only. */
+private fun copyPersonPhoto(c: Context, uri: Uri): String? {
+    val ext = when (c.contentResolver.getType(uri)) {
+        "image/png" -> ".png"
+        "image/webp" -> ".webp"
+        else -> ".jpg"
+    }
+    val name = "pfp_" + UUID.randomUUID().toString().replace("-", "") + ext
+    val file = File(c.filesDir, name)
+    return try {
+        val bytes = c.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        require(bytes.size <= 8_000_000) { "Image is too large." }
+        file.writeBytes(bytes)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        file.inputStream().use { BitmapFactory.decodeStream(it, null, bounds) }
+        require(bounds.outWidth in 1..8000 && bounds.outHeight in 1..8000) { "Not a usable image." }
+        name
+    } catch (e: Exception) {
+        file.delete()
+        null
     }
 }
+
+private fun loadPersonPhoto(c: Context, name: String, target: Int = 128) = runCatching<android.graphics.Bitmap?> {
+    if (name.isBlank() || name.contains('/') || name.contains('\\') || name.contains("..")) return@runCatching null
+    val file = File(c.filesDir, name)
+    if (!file.isFile) return@runCatching null
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    file.inputStream().use { BitmapFactory.decodeStream(it, null, bounds) }
+    val sample = maxOf(1, minOf(bounds.outWidth, bounds.outHeight) / target)
+    val raw = file.inputStream().use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) }
+        ?: return@runCatching null
+    Bitmap.createScaledBitmap(raw, target, target, true)
+}.getOrNull()
+
+@Composable
+private fun Avatar(name: String, file: String = "", size: Int = 44, selected: Boolean = false) {
+    val ctx = LocalContext.current
+    val bmp = remember(file, size) { loadPersonPhoto(ctx, file, size * 2) }
+    val shape = CircleShape
+    val tint = headColor(name, L.dark)
+    Box(
+        Modifier.size(size.dp).clip(shape).background(tint.copy(alpha = 0.18f))
+            .then(if (selected) Modifier.border(2.dp, L.accent, shape) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bmp != null) {
+            Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize().clip(shape), contentScale = ContentScale.Crop)
+        } else {
+            Text(name.trim().take(1).uppercase(), color = tint, fontSize = (size * 0.42f).sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+data class GroupDraft(
+    val name: String,
+    val note: String,
+    val members: List<Long>,
+    val total: Double,
+    val mode: String,
+    val weights: Map<Long, Double>,
+    val paidBy: Long,
+    val accountId: Long,
+    val date: Long
+)
 
 @Composable
 fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
@@ -48,48 +127,96 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     val txns by vm.txns.collectAsState()
     val allAccs by vm.accounts.collectAsState()
     val accs = remember(allAccs) { allAccs.filter { !it.archived } }
+    val groups by vm.groups.collectAsState()
+    val groupMembers by vm.groupMembers.collectAsState()
+    val groupDebts by vm.groupDebts.collectAsState()
     val hide by vm.prefs.hideBalances.collectAsState()
     var openId by rememberSaveable { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }
     var editingPerson by remember { mutableStateOf(false) }
+    var rare by remember { mutableStateOf(false) }
+    var groupEditor by remember { mutableStateOf(false) }
+    var groupError by remember { mutableStateOf("") }
+    var openGroupId by remember { mutableLongStateOf(0L) }
+    var groupSettleError by remember { mutableStateOf("") }
     val ctx = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     fun m(s: String) = if (hide) "••••" else s
+    fun who(id: Long) = if (id == 0L) "You" else people.firstOrNull { it.id == id }?.name ?: "Removed person"
     val person = people.firstOrNull { it.id == openId }
 
     if (person == null) {
         val toGet = bal.values.filter { it > 0 }.sum()
         val toPay = -bal.values.filter { it < 0 }.sum()
-        LazyColumn(modifier.fillMaxSize()) {
-            item {
-                Column(Modifier.padding(24.dp, 8.dp, 24.dp, 18.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                        Column { Cap("You’ll get"); Spacer(Modifier.height(6.dp)); Num(m(inr(toGet)), size = 30.sp, weight = FontWeight.Light, color = L.green) }
-                        Column { Cap("You owe"); Spacer(Modifier.height(6.dp)); Num(m(inr(toPay)), size = 30.sp, weight = FontWeight.Light, color = if (toPay > 0) L.red else L.text) }
-                    }
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 104.dp),
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 110.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(Modifier.fillMaxWidth().padding(8.dp, 0, 8.dp, 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column { Cap("You’ll get"); Spacer(Modifier.height(6.dp)); Num(m(inr(toGet)), size = 30.sp, weight = FontWeight.Light, color = L.green) }
+                    Column { Cap("You owe"); Spacer(Modifier.height(6.dp)); Num(m(inr(toPay)), size = 30.sp, weight = FontWeight.Light, color = if (toPay > 0) L.red else L.text) }
                 }
             }
-            if (people.isEmpty()) item {
-                Text("Split a bill, buy something for a friend, or lend money, and it shows up here. Add someone to start.", color = L.muted, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(24.dp, 4.dp, 24.dp, 16.dp))
-            } else item {
-                Panel(Modifier.padding(horizontal = 16.dp)) {
-                    people.forEachIndexed { i, p ->
-                        val b = bal[p.id] ?: 0.0
-                        Row(Modifier.fillMaxWidth().clickable { openId = p.id }.padding(18.dp, 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Avatar(p.name)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(p.name + if (p.relation.isNotBlank()) " · ${p.relation}" else "", color = L.text, fontSize = 16.sp)
-                                Text(m(balanceText(b)), color = if (b > 0.004) L.green else if (b < -0.004) L.red else L.muted, fontSize = 12.sp)
+            if (groups.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    Cap("Groups", Modifier.padding(8.dp, 0, 8.dp, 8.dp))
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        groups.forEach { g ->
+                            val open = groupDebts.filter { it.groupId == g.id && !it.settled }
+                            val toYou = open.filter { it.toPersonId == 0L }.sumOf { it.amount }
+                            val owe = open.filter { it.fromPersonId == 0L }.sumOf { it.amount }
+                            val tone = if (toYou > 0.004) L.green else if (owe > 0.004) L.red else L.muted
+                            val line = when {
+                                toYou > 0.004 -> "you get ${inr(toYou)}"
+                                owe > 0.004 -> "you owe ${inr(owe)}"
+                                else -> "all settled"
                             }
-                            Text("›", color = L.muted, fontSize = 22.sp)
+                            val count = groupMembers.count { it.groupId == g.id }
+                            Column(
+                                Modifier.width(158.dp).clip(RoundedCornerShape(18.dp)).background(L.surface)
+                                    .border(1.dp, L.border, RoundedCornerShape(18.dp))
+                                    .clickable { openGroupId = g.id; groupSettleError = "" }.padding(14.dp)
+                            ) {
+                                Text(g.name, color = L.text, fontSize = 14.sp, maxLines = 1)
+                                Spacer(Modifier.height(6.dp))
+                                Num(m(line), size = 12.sp, color = tone)
+                                Spacer(Modifier.height(6.dp))
+                                Text("$count people · ${open.size} open", color = L.muted, fontSize = 11.sp, maxLines = 1)
+                            }
                         }
-                        if (i < people.lastIndex) Hairline(Modifier.padding(start = 76.dp))
                     }
                 }
             }
-            item { Box(Modifier.padding(24.dp)) { MonoButton("+ Add person", { adding = true }, filled = false) } }
-            item { Spacer(Modifier.height(110.dp)) }
+            if (people.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+                Text("Split a bill, lend money, or buy something for a friend. Add someone to start.",
+                    color = L.muted, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(8.dp, 4.dp, 8.dp, 12.dp))
+            }
+            items(people, key = { it.id }) { p ->
+                val b = bal[p.id] ?: 0.0
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(L.surface)
+                        .border(1.dp, L.border, RoundedCornerShape(20.dp))
+                        .clickable { openId = p.id }.padding(12.dp, 14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Avatar(p.name, p.photoUri, 50)
+                    Spacer(Modifier.height(12.dp))
+                    Text(p.name, color = L.text, fontSize = 14.sp, maxLines = 1)
+                    Spacer(Modifier.height(4.dp))
+                    val tone = if (b > 0.004) L.green else if (b < -0.004) L.red else L.muted
+                    Num(m(shortBalance(b)), size = 11.sp, color = tone)
+                }
+            }
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Row(Modifier.fillMaxWidth().padding(8.dp, 6.dp, 8.dp, 0.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MonoButton("+ Add person", { adding = true }, Modifier.weight(1f), filled = false)
+                    MonoButton("⋯", { rare = true }, Modifier.width(58.dp), filled = false)
+                }
+            }
         }
     } else {
         val b = bal[person.id] ?: 0.0
@@ -103,7 +230,8 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                     }
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(person.name, 56); Spacer(Modifier.width(16.dp))
+                        Avatar(person.name, person.photoUri, 56)
+                        Spacer(Modifier.width(16.dp))
                         Column {
                             Text(person.name, color = L.text, fontSize = 22.sp)
                             Text(m(balanceText(b)), color = if (b > 0.004) L.green else if (b < -0.004) L.red else L.muted, fontSize = 14.sp)
@@ -119,7 +247,8 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                     }
                     if (abs(b) > 0.004) {
                         Spacer(Modifier.height(10.dp))
-                        MonoButton(if (b > 0) "Settle up · they pay ${inr(b)}" else "Settle up · you pay ${inr(b)}", { dialog = if (b > 0) "RECEIVE" else "GIVE" }, Modifier.fillMaxWidth(), filled = false)
+                        MonoButton(if (b > 0) "Settle up · they pay ${inr(b)}" else "Settle up · you pay ${inr(b)}",
+                            { dialog = if (b > 0) "RECEIVE" else "GIVE" }, Modifier.fillMaxWidth(), filled = false)
                         if (b > 0) { Spacer(Modifier.height(8.dp)); MonoButton("Send a reminder", { remind(ctx, person, b) }, Modifier.fillMaxWidth(), filled = false) }
                     }
                     if (person.note.isNotBlank()) { Spacer(Modifier.height(12.dp)); Text(person.note, color = L.muted, fontSize = 13.sp, lineHeight = 18.sp) }
@@ -167,9 +296,84 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
 
     if (adding) PersonDialog(null, false, { adding = false }, { vm.savePerson(it); adding = false }, {})
     if (editingPerson && person != null) PersonDialog(
-        person, abs(bal[person.id] ?: 0.0) < 0.005, { editingPerson = false }, { vm.savePerson(it); editingPerson = false },
+        person, abs(bal[person.id] ?: 0.0) < 0.005, { editingPerson = false },
+        { vm.savePerson(it); editingPerson = false },
         { vm.deletePerson(person.id); openId = 0; editingPerson = false }
     )
+
+    if (rare) AlertDialog(
+        onDismissRequest = { rare = false }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
+        title = { Cap("Rare actions", color = L.text) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Occasion groups stay out of the daily flow. Removing a group keeps its ledger entries.",
+                    color = L.muted, fontSize = 12.sp, lineHeight = 17.sp)
+                groups.forEach { g ->
+                    val names = groupMembers.filter { it.groupId == g.id }
+                        .mapNotNull { m -> people.firstOrNull { it.id == m.personId }?.name }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(g.name, color = L.text, fontSize = 14.sp, maxLines = 1)
+                            Text(names.joinToString(", ").ifBlank { "No people" }, color = L.muted, fontSize = 11.sp, maxLines = 1)
+                        }
+                        TextButton({ vm.deleteGroup(g.id) }) { Text("Remove", color = L.red, fontSize = 12.sp) }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton({ rare = false; groupError = ""; groupEditor = true }) { Text("New group") } },
+        dismissButton = { TextButton({ rare = false }) { Text("Close") } }
+    )
+
+    if (groupEditor) GroupDialog(
+        people = people, accounts = accs, error = groupError,
+        onDismiss = { groupEditor = false },
+        onSave = { d ->
+            groupError = ""
+            vm.saveGroup(d.name, d.note, d.members, d.total, d.mode, d.weights, d.paidBy, d.accountId, d.date,
+                done = { groupEditor = false },
+                fail = { groupError = it })
+        }
+    )
+
+    val openGroup = groups.firstOrNull { it.id == openGroupId }
+    if (openGroup != null) {
+        val debts = groupDebts.filter { it.groupId == openGroup.id }.sortedBy { it.settled }
+        val settleAccId = accs.firstOrNull { it.isDefault }?.id ?: accs.firstOrNull()?.id ?: 0L
+        AlertDialog(
+            onDismissRequest = { openGroupId = 0 }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
+            title = { Cap(openGroup.name, color = L.text) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (openGroup.note.isNotBlank()) Text(openGroup.note, color = L.muted, fontSize = 12.sp)
+                    Text("Everyone’s share is shown here. Only debts between you and someone else appear on their person page.",
+                        color = L.muted, fontSize = 11.sp, lineHeight = 16.sp)
+                    if (groupSettleError.isNotBlank()) Text(groupSettleError, color = L.red, fontSize = 12.sp)
+                    if (debts.isEmpty()) Text("No debts recorded.", color = L.muted, fontSize = 13.sp)
+                    debts.forEach { d ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("${who(d.fromPersonId)}  →  ${who(d.toPersonId)}", color = L.text, fontSize = 13.sp, maxLines = 1)
+                                Text(if (d.settled) "settled" else "open", color = if (d.settled) L.muted else L.accent, fontSize = 11.sp)
+                            }
+                            Num(m(inr(d.amount)), size = 13.sp, color = if (d.settled) L.muted else L.text)
+                            if (!d.settled && (d.fromPersonId == 0L || d.toPersonId == 0L)) {
+                                TextButton(onClick = {
+                                    vm.settleGroupDebt(d, settleAccId, done = {}, fail = { groupSettleError = it })
+                                }, enabled = settleAccId != 0L) { Text("Settle", fontSize = 12.sp) }
+                            }
+                        }
+                        Hairline()
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton({ vm.deleteGroup(openGroup.id); openGroupId = 0 }) { Text("Remove group", color = L.red) }
+            },
+            dismissButton = { TextButton({ openGroupId = 0 }) { Text("Close") } }
+        )
+    }
+
     dialog?.let { kind ->
         val b = person?.let { bal[it.id] } ?: 0.0
         val name = person?.name ?: ""
@@ -202,7 +406,9 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
             confirmButton = {
                 TextButton({
                     val v = amt.toDoubleOrNull() ?: 0.0
-                    if (v > 0 && person != null && (kind == "THEY_PAID" || acc != 0L)) { vm.settle(person.id, kind, round2(v), acc, note.trim()); dialog = null }
+                    if (v > 0 && person != null && (kind == "THEY_PAID" || acc != 0L)) {
+                        vm.settle(person.id, kind, round2(v), acc, note.trim()); dialog = null
+                    }
                 }) { Text("Save") }
             },
             dismissButton = { TextButton({ dialog = null }) { Text("Cancel") } }
@@ -212,15 +418,33 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun PersonDialog(person: Person?, canRemove: Boolean, onDismiss: () -> Unit, onSave: (Person) -> Unit, onDelete: () -> Unit) {
+    val ctx = LocalContext.current
     var name by remember { mutableStateOf(person?.name ?: "") }
     var relation by remember { mutableStateOf(person?.relation ?: "") }
     var phone by remember { mutableStateOf(person?.phone ?: "") }
     var note by remember { mutableStateOf(person?.note ?: "") }
+    var photo by remember { mutableStateOf(person?.photoUri ?: "") }
+    var photoError by remember { mutableStateOf("") }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val saved = copyPersonPhoto(ctx, uri)
+            if (saved != null) { photo = saved; photoError = "" } else photoError = "Couldn’t use that image."
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
         title = { Cap(if (person == null) "New person" else "Edit person", color = L.text) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(name.ifBlank { "?" }, photo, 52)
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        MonoButton(if (photo.isBlank()) "Add photo" else "Change photo", { pick.launch("image/*") }, filled = false)
+                        if (photo.isNotBlank()) TextButton({ photo = "" }) { Text("Clear", color = L.muted, fontSize = 12.sp) }
+                    }
+                }
+                if (photoError.isNotBlank()) Text(photoError, color = L.red, fontSize = 12.sp)
                 Field("Name", name, { name = it })
                 Cap("Relation")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -230,13 +454,130 @@ fun PersonDialog(person: Person?, canRemove: Boolean, onDismiss: () -> Unit, onS
                 Field("Note (optional)", note, { note = it })
             }
         },
-        confirmButton = { TextButton({ if (name.isNotBlank()) onSave(Person(person?.id ?: 0, name.trim(), relation, phone.trim(), note.trim())) }) { Text("Save") } },
+        confirmButton = {
+            TextButton({ if (name.isNotBlank()) onSave(Person(person?.id ?: 0, name.trim(), relation, phone.trim(), note.trim(), photo)) }) {
+                Text("Save")
+            }
+        },
         dismissButton = {
             Row {
                 if (person != null && canRemove) TextButton(onDelete) { Text("Remove", color = L.red) }
                 TextButton(onDismiss) { Text("Cancel") }
             }
         }
+    )
+}
+
+@Composable
+private fun GroupDialog(
+    people: List<Person>,
+    accounts: List<Account>,
+    error: String,
+    onDismiss: () -> Unit,
+    onSave: (GroupDraft) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+    var mode by remember { mutableStateOf("EQUAL") }
+    var selected by remember { mutableStateOf(setOf<Long>()) }
+    var weights by remember { mutableStateOf(mapOf<Long, String>()) }
+    var paidBy by remember { mutableLongStateOf(0L) }
+    var acc by remember { mutableLongStateOf(accounts.firstOrNull { it.isDefault }?.id ?: accounts.firstOrNull()?.id ?: 0L) }
+    var date by remember { mutableStateOf(today()) }
+    var showDate by remember { mutableStateOf(false) }
+
+    val chosen = people.filter { it.id in selected }
+    val participants = listOf(0L) + chosen.map { it.id }
+    val payerOptions = listOf("You" to 0L) + chosen.map { it.name to it.id }
+    val weightValues = if (mode == "EQUAL") {
+        participants.associateWith { 1.0 }
+    } else {
+        participants.associate { id ->
+            val v = weights[id]?.toDoubleOrNull() ?: 1.0
+            id to if (v.isFinite() && v >= 0.0) v else -1.0
+        }
+    }
+    val total = amount.toDoubleOrNull() ?: 0.0
+    val ready = name.isNotBlank() && total > 0.0 && chosen.isNotEmpty() && (paidBy != 0L || acc != 0L) &&
+        (paidBy == 0L || paidBy in selected) && weightValues.values.all { it >= 0.0 } && weightValues.values.any { it > 0.0 }
+
+    fun toggle(id: Long) {
+        selected = if (id in selected) selected - id else selected + id
+        weights = weights + (id to (weights[id] ?: "1"))
+        if (id == paidBy && id !in selected) paidBy = 0L
+    }
+
+    if (showDate) {
+        val st = rememberDatePickerState(
+            initialSelectedDateMillis = Instant.ofEpochMilli(date).atZone(ZoneId.systemDefault()).toLocalDate()
+                .atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDate = false },
+            confirmButton = { TextButton({ st.selectedDateMillis?.let { date = pickerToLocal(it) }; showDate = false }) { Text("OK") } },
+            dismissButton = { TextButton({ showDate = false }) { Text("Cancel") } }
+        ) { DatePicker(st) }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
+        title = { Cap("Occasion split", color = L.text) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                if (error.isNotBlank()) Text(error, color = L.red, fontSize = 12.sp)
+                Field("Occasion", name, { name = it.take(60) })
+                Field("Total amount", amount, { amount = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, kb = KeyboardType.Decimal)
+                Cap("Who was there")
+                if (people.isEmpty()) Text("Add people first.", color = L.muted, fontSize = 13.sp)
+                else {
+                    val rows = people.chunked(4)
+                    rows.forEach { row ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { p ->
+                                Column(
+                                    Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).background(L.surface)
+                                        .border(1.dp, if (p.id in selected) L.accent else L.border, RoundedCornerShape(16.dp))
+                                        .clickable { toggle(p.id) }.padding(8.dp, 10.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Avatar(p.name, p.photoUri, 38, selected = p.id in selected)
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(p.name, color = L.text, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
+                Cap("Split")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("Equal", mode == "EQUAL") { mode = "EQUAL" }
+                    Chip("Custom", mode == "CUSTOM") { mode = "CUSTOM" }
+                }
+                if (mode == "CUSTOM") {
+                    Text("Enter parts, not percentages. You is always included.", color = L.muted, fontSize = 11.sp)
+                    participants.forEach { id ->
+                        val label = if (id == 0L) "You" else people.firstOrNull { it.id == id }?.name ?: "Person"
+                        Field(label, weights[id] ?: "1", { weights = weights + (id to it.filter { c -> c.isDigit() || c == '.' }.take(6)) },
+                            modifier = Modifier.fillMaxWidth(), kb = KeyboardType.Decimal)
+                    }
+                }
+                Picker("Paid by", payerOptions.firstOrNull { it.second == paidBy }?.first ?: "You", payerOptions, { paidBy = it })
+                Picker("Account", accounts.firstOrNull { it.id == acc }?.name ?: "Select", accounts.map { it.name to it.id }, { acc = it })
+                Column(Modifier.clickable { showDate = true }) {
+                    Cap("Date")
+                    Text(dayLabel(date), color = L.text, fontSize = 16.sp, modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
+                    Hairline()
+                }
+                Field("Note (optional)", note, { note = it.take(120) })
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (ready) onSave(GroupDraft(name.trim(), note.trim(), selected.toList(), total, mode, weightValues, paidBy, acc, date))
+            }, enabled = ready) { Text("Split") }
+        },
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
     )
 }
 

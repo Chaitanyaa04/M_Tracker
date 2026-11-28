@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -90,6 +91,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val persons = repo.persons.eager(emptyList())
     val deletedTxns = repo.deletedTxns.eager(emptyList())
     val changeHistory = repo.changeHistory.eager(emptyList())
+    val groups = repo.groups.eager(emptyList())
+    val groupMembers = repo.groupMembers.eager(emptyList())
+    val groupDebts = repo.groupDebts.eager(emptyList())
     val peopleNames = persons.map { l -> l.associate { it.id to it.name } }.eager(emptyMap())
     /** personId -> balance. Positive = they owe you, negative = you owe them. */
     val personBalances = txns.map { l -> l.filter { it.personId != 0L }.groupBy { it.personId }.mapValues { e -> e.value.sumOf { it.owed } } }.eager(emptyMap())
@@ -271,8 +275,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .groupingBy { it.routeFrom to it.routeTo }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(4)
 
     fun addPerson(name: String, done: (Long) -> Unit = {}) = viewModelScope.launch { if (name.isNotBlank()) done(repo.addPerson(name)) }
-    fun deletePerson(id: Long) = viewModelScope.launch { repo.deletePerson(id) }
-    fun savePerson(p: Person) = viewModelScope.launch { repo.savePerson(p) }
+
+    fun deletePerson(id: Long) = viewModelScope.launch {
+        val old = repo.personById(id)
+        repo.deletePerson(id)
+        if (old != null && old.photoUri.isNotBlank()) runCatching { File(app.filesDir, old.photoUri).delete() }
+    }
+
+    fun savePerson(p: Person) = viewModelScope.launch {
+        val old = if (p.id == 0L) null else repo.personById(p.id)
+        repo.savePerson(p)
+        if (old != null && old.photoUri != p.photoUri && old.photoUri.isNotBlank()) {
+            runCatching { File(app.filesDir, old.photoUri).delete() }
+        }
+    }
+
+    /** Rare-action group split. Shares are written as normal ledger rows, so balances stay consistent. */
+    fun saveGroup(
+        name: String, note: String, members: List<Long>, total: Double,
+        mode: String, weights: Map<Long, Double>, paidBy: Long, accountId: Long, date: Long,
+        done: (Long) -> Unit = {}, fail: (String) -> Unit = {}
+    ) = viewModelScope.launch {
+        runCatching { repo.saveGroup(name, note, members, total, mode, weights, paidBy, accountId, date) }
+            .onSuccess(done)
+            .onFailure { fail(it.message ?: "Could not save the group.") }
+    }
+
+    fun deleteGroup(id: Long) = viewModelScope.launch { repo.deleteGroup(id) }
+
+    fun settleGroupDebt(debt: GroupDebt, accountId: Long, done: () -> Unit = {}, fail: (String) -> Unit = {}) =
+        viewModelScope.launch {
+            runCatching { repo.settleGroupDebt(debt, accountId) }
+                .onSuccess { done() }
+                .onFailure { fail(it.message ?: "Could not settle this debt.") }
+        }
 
     /** kind: GIVE (money leaves your account, they owe you more), RECEIVE (money comes in, they owe you less),
      *  THEY_PAID (they paid something for you; no account involved, you owe them more). */
@@ -284,6 +320,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Txn(type = "PERSON_IN", amount = amount, note = note, date = today(), category = "People", accountId = accountId, personId = personId, owed = -amount)
             else Txn(type = "PERSON_ADJ", amount = amount, note = note, date = today(), category = "People", accountId = 0, personId = personId, owed = -amount)
         }
-        repo.addTxn(t)
+        repo.settlePerson(t)
     }
 }

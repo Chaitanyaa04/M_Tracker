@@ -109,16 +109,43 @@ interface LedgerDao {
     @Query("DELETE FROM daymarks") suspend fun clearDayMarks()
     @Query("DELETE FROM deleted_txns") suspend fun clearDeletedTxnsAll()
     @Query("DELETE FROM change_history") suspend fun clearHistory()
+    @Query("DELETE FROM occasion_groups") suspend fun clearGroups()
 
     // people
     @Query("SELECT * FROM persons ORDER BY name COLLATE NOCASE") fun persons(): Flow<List<Person>>
     @Query("SELECT * FROM persons") suspend fun allPersons(): List<Person>
+    @Query("SELECT * FROM persons WHERE id = :id") suspend fun personById(id: Long): Person?
     @Insert suspend fun insertPerson(p: Person): Long
     @Query("DELETE FROM persons WHERE id = :id") suspend fun deletePerson(id: Long)
     @Query("UPDATE transactions SET personId = 0, owed = 0 WHERE personId = :id") suspend fun detachPerson(id: Long)
     @Query("DELETE FROM persons") suspend fun clearPersons()
 
     @Update suspend fun updatePerson(p: Person)
+
+    // occasion groups
+    @Query("SELECT * FROM occasion_groups ORDER BY createdAt DESC") fun groups(): Flow<List<OccasionGroup>>
+    @Query("SELECT * FROM occasion_groups") suspend fun allGroups(): List<OccasionGroup>
+    @Insert suspend fun insertGroup(g: OccasionGroup): Long
+    @Query("DELETE FROM occasion_groups WHERE id = :id") suspend fun deleteGroup(id: Long)
+    @Query("SELECT * FROM group_members WHERE groupId = :groupId") suspend fun membersOf(groupId: Long): List<GroupMember>
+    @Query("SELECT * FROM group_members") suspend fun allGroupMembers(): List<GroupMember>
+    @Query("SELECT * FROM group_members ORDER BY groupId") fun allGroupMembersFlow(): Flow<List<GroupMember>>
+    @Query("SELECT personId FROM group_members WHERE groupId = :groupId") fun groupMemberIds(groupId: Long): Flow<List<Long>>
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertGroupMember(m: GroupMember)
+    @Query("DELETE FROM group_members WHERE groupId = :id") suspend fun deleteGroupMembers(id: Long)
+    @Query("DELETE FROM group_members WHERE personId = :id") suspend fun deleteGroupMembersOfPerson(id: Long)
+    @Query("DELETE FROM group_members") suspend fun clearGroupMembers()
+
+    // group debts
+    @Query("SELECT * FROM group_debts ORDER BY groupId, id") fun groupDebts(): Flow<List<GroupDebt>>
+    @Query("SELECT * FROM group_debts") suspend fun allGroupDebts(): List<GroupDebt>
+    @Insert suspend fun insertGroupDebt(d: GroupDebt): Long
+    @Query("UPDATE group_debts SET settled = 1 WHERE id = :id AND settled = 0") suspend fun settleGroupDebt(id: Long): Int
+    @Query("SELECT * FROM group_debts WHERE settled = 0 AND ((fromPersonId = 0 AND toPersonId = :personId) OR (fromPersonId = :personId AND toPersonId = 0)) ORDER BY groupId, id")
+    suspend fun openGroupDebtsWith(personId: Long): List<GroupDebt>
+    @Query("DELETE FROM group_debts WHERE groupId = :id") suspend fun deleteGroupDebts(id: Long)
+    @Query("DELETE FROM group_debts WHERE fromPersonId = :id OR toPersonId = :id") suspend fun deleteGroupDebtsOfPerson(id: Long)
+    @Query("DELETE FROM group_debts") suspend fun clearGroupDebts()
     @Query("SELECT * FROM transactions WHERE accountId = :id AND type = 'EXPENSE' ORDER BY createdAt DESC, id DESC LIMIT 1")
     suspend fun lastExpenseFor(id: Long): Txn?
 }

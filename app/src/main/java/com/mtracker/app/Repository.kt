@@ -8,6 +8,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
 import java.time.ZoneId
+import kotlin.math.floor
 
 class Repository(private val db: AppDatabase) {
     private val d = db.dao()
@@ -21,6 +22,9 @@ class Repository(private val db: AppDatabase) {
     val persons = d.persons()
     val deletedTxns = d.deletedTxns()
     val changeHistory = d.changeHistory()
+    val groups = d.groups()
+    val groupMembers = d.allGroupMembersFlow()
+    val groupDebts = d.groupDebts()
 
     private fun Txn.asJson() = JSONObject()
         .put("id", id).put("type", type).put("amount", amount).put("merchant", merchant)
@@ -166,17 +170,137 @@ class Repository(private val db: AppDatabase) {
     suspend fun deleteCategory(name: String, kind: String) = d.deleteCategory(name, kind)
     suspend fun markNoSpend(day: Long) = d.insertMark(DayMark(day))
     suspend fun addPerson(name: String): Long = d.insertPerson(Person(name = name.trim()))
+    suspend fun personById(id: Long): Person? = d.personById(id)
+
     suspend fun deletePerson(id: Long) = db.withTransaction {
-        d.allPersons().firstOrNull { it.id == id }?.let { p ->
+        d.personById(id)?.let { p ->
             record("PERSON", id, "DELETE", JSONObject().put("id", p.id).put("name", p.name).toString())
         }
         d.allTxns().filter { it.personId == id }.forEach { t ->
             record("TXN", t.id, "PERSON_DETACH", t.asJson().toString())
         }
-        d.detachPerson(id); d.deletePerson(id)
+        d.detachPerson(id); d.deleteGroupMembersOfPerson(id); d.deleteGroupDebtsOfPerson(id); d.deletePerson(id)
     }
     suspend fun addTxn(t: Txn) { save(t) }
     suspend fun savePerson(p: Person): Long = if (p.id == 0L) d.insertPerson(p) else { d.updatePerson(p); p.id }
+
+    /** Splits whole rupees into paise so the saved shares always add back to the exact bill. */
+    private fun splitCents(totalCents: Long, parts: List<Pair<Long, Double>>): Map<Long, Long> {
+        val sum = parts.sumOf { it.second }
+        require(sum > 0.0 && sum.isFinite()) { "Invalid split weights." }
+        require(parts.all { it.second >= 0.0 && it.second.isFinite() }) { "Split weights must be positive." }
+        val raw = parts.map { totalCents * it.second / sum }
+        val cents = raw.map { floor(it).toLong() }.toMutableList()
+        var left = totalCents - cents.sum()
+        val order = raw.indices.sortedByDescending { raw[it] - cents[it] }
+        var i = 0
+        while (left > 0 && order.isNotEmpty()) {
+            cents[order[i % order.size]]++
+            left--
+            i++
+        }
+        return parts.mapIndexed { idx, part -> part.first to cents[idx] }.toMap()
+    }
+
+    /**
+     * Saves an occasion split. paidBy = 0 means you paid; otherwise it is the person who paid.
+     * You are always a participant. The group card records every person's debt to the payer;
+     * the normal ledger only records debts involving you, so a person page stays uncluttered.
+     */
+    suspend fun saveGroup(
+        name: String, note: String, members: List<Long>, total: Double,
+        mode: String, weights: Map<Long, Double>, paidBy: Long, accountId: Long, date: Long
+    ): Long = db.withTransaction {
+        val trimmed = name.trim()
+        require(trimmed.isNotBlank()) { "Group name is required." }
+        require(total > 0.0 && total.isFinite() && total <= 1_000_000_000.0) { "Invalid group total." }
+        require(members.isNotEmpty()) { "Choose at least one person." }
+        require(members.size == members.toSet().size) { "A person is selected twice." }
+        val known = d.allPersons().map { it.id }.toSet()
+        require(members.all { it in known }) { "Group references a missing person." }
+        require(paidBy == 0L || paidBy in members) { "Payer must be one of the selected people." }
+        if (paidBy == 0L) require(accountId != 0L) { "Choose an account for your payment." }
+        require(date in 0L..4_102_444_800_000L) { "Group date out of range." }
+
+        val peopleOrder = d.allPersons().map { it.id }
+        val participants = listOf(0L) + peopleOrder.filter { it in members.toSet() }
+        val totalCents = Math.round(total * 100.0)
+        val shares = splitCents(totalCents, participants.map { it to (weights[it] ?: 1.0) })
+        val gid = d.insertGroup(OccasionGroup(name = trimmed.take(80), note = note.trim().take(300), createdAt = System.currentTimeMillis()))
+        members.forEach { d.insertGroupMember(GroupMember(gid, it)) }
+        // Everyone except the payer owes the payer their own share. This keeps the whole
+        // group visible inside the group card while the person page still shows only your own dealings.
+        participants.filter { it != paidBy }.forEach { p ->
+            val cents = shares[p] ?: 0L
+            if (cents > 0L) d.insertGroupDebt(GroupDebt(groupId = gid, fromPersonId = p, toPersonId = paidBy, amount = cents / 100.0))
+        }
+        val noteText = "Group · ${trimmed.take(60)}"
+        val now = System.currentTimeMillis()
+        for (p in participants) {
+            val cents = shares[p] ?: 0L
+            if (cents <= 0L) continue
+            val share = cents / 100.0
+            val t = when {
+                paidBy == 0L && p == 0L -> Txn(type = "EXPENSE", amount = share, note = noteText, date = date,
+                    category = "People", accountId = accountId, createdAt = now)
+                paidBy == 0L -> Txn(type = "EXPENSE", amount = share, note = noteText, date = date,
+                    category = "People", accountId = accountId, personId = p, owed = share, createdAt = now)
+                p == 0L -> Txn(type = "PERSON_ADJ", amount = share, note = noteText, date = date,
+                    category = "People", accountId = 0, personId = paidBy, owed = -share, createdAt = now)
+                else -> continue
+            }
+            d.insert(t)
+        }
+        record("GROUP", gid, "CREATE", JSONObject().put("name", trimmed).put("total", total)
+            .put("mode", mode).put("paidBy", paidBy).toString())
+        gid
+    }
+
+    suspend fun deleteGroup(id: Long) = db.withTransaction {
+        record("GROUP", id, "DELETE", "")
+        d.deleteGroupMembers(id)
+        d.deleteGroupDebts(id)
+        d.deleteGroup(id)
+    }
+
+    /** Settles one group debt that involves you, using the existing person-balance ledger. */
+    suspend fun settleGroupDebt(debt: GroupDebt, accountId: Long) = db.withTransaction {
+        require(debt.fromPersonId == 0L || debt.toPersonId == 0L) { "This debt is between two other people." }
+        require(accountId != 0L) { "Choose an account." }
+        // Conditional update is the guard: two rapid taps cannot write two settlement rows.
+        require(d.settleGroupDebt(debt.id) == 1) { "Debt is already settled." }
+        val other = if (debt.fromPersonId == 0L) debt.toPersonId else debt.fromPersonId
+        val t = if (debt.fromPersonId == 0L) {
+            Txn(type = "PERSON_OUT", amount = debt.amount, note = "Group · settled", date = today(),
+                category = "People", accountId = accountId, personId = other, owed = debt.amount,
+                createdAt = System.currentTimeMillis())
+        } else {
+            Txn(type = "PERSON_IN", amount = debt.amount, note = "Group · settled", date = today(),
+                category = "People", accountId = accountId, personId = other, owed = -debt.amount,
+                createdAt = System.currentTimeMillis())
+        }
+        d.insert(t)
+        record("GROUP_DEBT", debt.id, "SETTLE", JSONObject().put("amount", debt.amount).toString())
+    }
+
+    /** Saves a person settlement and closes matching open group debts that it fully covers. */
+    suspend fun settlePerson(t: Txn) = db.withTransaction {
+        require(t.personId != 0L) { "Choose a person to settle." }
+        d.insert(t)
+        val youPay = t.type == "PERSON_OUT"
+        val theyPay = t.type == "PERSON_IN"
+        if (!youPay && !theyPay) return@withTransaction
+        var left = t.amount
+        for (debt in d.openGroupDebtsWith(t.personId)) {
+            if (left <= 0.005) break
+            val directionMatches = if (youPay) debt.fromPersonId == 0L else debt.fromPersonId == t.personId
+            if (!directionMatches || debt.amount > left + 0.005) continue
+            if (d.settleGroupDebt(debt.id) == 1) {
+                left -= debt.amount
+                record("GROUP_DEBT", debt.id, "SETTLE", JSONObject().put("amount", debt.amount).put("via", t.type).toString())
+            }
+        }
+    }
 
     // ---------- CSV (Storage Access Framework URIs; no storage permission) ----------
     private val header = "date,type,amount,merchant,note,category,account,to_account,tag,exclude_from_budget"

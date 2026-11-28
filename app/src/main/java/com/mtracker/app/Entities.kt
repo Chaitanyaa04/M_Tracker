@@ -1,5 +1,6 @@
 package com.mtracker.app
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -81,14 +82,15 @@ data class Category(val name: String, val kind: String, val icon: String = "")
 @Entity(tableName = "daymarks")
 data class DayMark(@PrimaryKey val date: Long)
 
-/** Someone you split with, lend to, or buy things for. */
+/** Someone you split with, lend to, or buy things for. photoUri is only an app-private file name. */
 @Entity(tableName = "persons")
 data class Person(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val relation: String = "",
     val phone: String = "",
-    val note: String = ""
+    val note: String = "",
+    @ColumnInfo(defaultValue = "''") val photoUri: String = ""
 )
 
 /** A deleted transaction kept locally so it can be recovered from the Recycle Bin. */
@@ -112,6 +114,30 @@ data class DeletedTxn(
     val routeTo: String = "",
     val items: String = "",
     val deletedAt: Long
+)
+
+/** A rare occasion (trip, dinner, party) whose bill is split between selected people. */
+@Entity(tableName = "occasion_groups")
+data class OccasionGroup(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val note: String = "",
+    val createdAt: Long
+)
+
+/** Join table: which people belong to an occasion group. */
+@Entity(tableName = "group_members", primaryKeys = ["groupId", "personId"])
+data class GroupMember(val groupId: Long, val personId: Long)
+
+/** One direction of an occasion debt. personId 0 means you; settled debts stay hidden from totals. */
+@Entity(tableName = "group_debts")
+data class GroupDebt(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val groupId: Long,
+    val fromPersonId: Long,
+    val toPersonId: Long,
+    val amount: Double,
+    @ColumnInfo(defaultValue = "0") val settled: Boolean = false
 )
 
 /** Small local audit trail: what changed, when, and the previous value as JSON. */
