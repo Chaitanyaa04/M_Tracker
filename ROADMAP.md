@@ -1,6 +1,6 @@
 # Arthak roadmap
 
-Status as of 2026-11-28; heads/theme batch committed as `617b082`. Last verified dev release `dev-1.3.35`.
+Status as of 2026-11-28; last verified dev release `dev-1.3.37`.
 
 ## Shipped
 
@@ -12,10 +12,12 @@ Status as of 2026-11-28; heads/theme batch committed as `617b082`. Last verified
 - Transactions open from the ledger, person history, Insights period sheet, and trip expense list; the opened sheet has a delete icon, and swipe-to-delete stays active for ordinary rows.
 - Core hardening: person removal detaches without erasing `owed`, names are backup-safe, orphan IDs cannot be restored, `PERSON_*` settlement rows are protected from swipe and account archival.
 - Heads: drag ordering, hide, rename and re-icon; hidden heads leave pickers but stay in history. Theme chips scroll so the System option is never clipped.
+- Manual-first payment prompts: only app-open usage metadata, **Expense / Income / Wrong call**, no notification reading and no silent ledger writes.
 - Release gate: unit tests → signed build → `apksigner` verification → publish. Stable tags must be `v1.4.0+`.
 
 ## Now — back to the original idea
 
+- Quick entry: **+** → head tray → entry sheet with that head already selected and amount focused. Clearer form title, icon tiles for people/groups/splits, and those details moved under **More details**.
 - Payment prompt is the primary flow: app was opened → **Expense / Income / Wrong call** → manual amount and merchant.
 - Nothing is read from notification text, SMS, screens, contacts or balances. No silent ledger writes.
 - The payment apps already record the transaction; Arthak is the place where you *think about it* and file it.

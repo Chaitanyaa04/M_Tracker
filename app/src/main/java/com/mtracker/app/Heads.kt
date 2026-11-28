@@ -73,6 +73,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -262,9 +263,11 @@ fun MerchantsSheet(names: List<String>, selected: String, onPick: (String) -> Un
 fun HeadsSheet(
     heads: List<Category>, initialKind: String, selected: String?, usage: Map<String, Int>,
     likely: (String) -> List<String>, showKindSwitch: Boolean,
-    onPick: (String, String) -> Unit, onCreate: (String, String, String) -> Unit, onDismiss: () -> Unit
+    label: String = "Choose a head", hint: String? = null,
+    onPick: (String, String) -> Unit, onCreate: ((String, String, String) -> Unit)? = null, onDismiss: () -> Unit
 ) {
     var kind by remember { mutableStateOf(initialKind) }
+    LaunchedEffect(initialKind) { kind = initialKind }   // a new intent can replace the pending draft
     var q by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     val list = heads.filter { it.kind == kind }
@@ -284,12 +287,14 @@ fun HeadsSheet(
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Cap("Choose a head", color = L.text)
+                if (hint != null) Text(label, color = L.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                else Cap(label, color = L.text)
                 if (showKindSwitch) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Expense", kind == "EXPENSE") { kind = "EXPENSE" }
                     Chip("Income", kind == "INCOME") { kind = "INCOME" }
                 }
             }
+            if (hint != null) Text(hint, color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             Field("Search heads", q, { q = it })
         }
         LazyVerticalGrid(
@@ -307,7 +312,7 @@ fun HeadsSheet(
             }
             item(span = { GridItemSpan(maxLineSpan) }, key = "ha") { Cap("All heads", Modifier.padding(8.dp, 12.dp, 8.dp, 2.dp)) }
             items(shown, key = { "a$it" }) { n -> HeadChoice(n, n == selected) { onPick(n, kind) } }
-            item(key = "new") {
+            if (onCreate != null) item(key = "new") {
                 Column(
                     Modifier.clip(RoundedCornerShape(14.dp)).clickable { creating = true }.padding(vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -323,7 +328,9 @@ fun HeadsSheet(
         }
         Spacer(Modifier.height(24.dp))
     }
-    if (creating) NewHeadDialog(kind, { n, k, ic -> creating = false; onCreate(n, k, ic) }, { creating = false })
+    onCreate?.let { create ->
+        if (creating) NewHeadDialog(kind, { n, k, ic -> creating = false; create(n, k, ic) }, { creating = false })
+    }
 }
 
 @Composable

@@ -50,9 +50,13 @@ Afterwards, the app checks GitHub daily and on resume. It shows one notification
 
 System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available in Settings. All four chips stay reachable on narrow screens; System dark uses Soft Dark, and OLED Black is pure black. The daily safe-to-spend card is off by default and can be enabled under Settings → Appearance.
 
+## Quick entry
+
+The centre **+** opens a small head tray first — likely and most-used heads come before the full list. Pick one and the entry sheet opens with that head already selected and the amount field focused. The chosen head keeps its normal place in the quick strip instead of jumping to the top. People, occasion groups, split modes, travel route and date sit under **More details**; a group only narrows the people tiles and never changes the head. New heads can still be created from the entry sheet. Transfers skip the head step.
+
 ## Payment prompts
 
-Add the payment apps you use under Settings → Payment reminders. Arthak only notices *which* of those apps was opened; it never reads notification text, SMS, screens, contacts or amounts. It asks **Expense / Income / Wrong call**, then opens an empty entry sheet so you type the amount and merchant yourself. Nothing is saved automatically from a notification. Quiet mode checks about every 15 minutes; Instant mode asks sooner and shows a small status notification.
+Add the payment apps you use under Settings → Payment reminders. Arthak only notices *which* of those apps was opened; it never reads notification text, SMS, screens, contacts or amounts. It asks **Expense / Income / Wrong call**, opens the head tray, then an empty entry sheet so you type the amount and merchant yourself. Nothing is saved automatically from a notification. Quiet mode checks about every 15 minutes; Instant mode asks sooner and shows a small status notification.
 
 ## Data safety
 

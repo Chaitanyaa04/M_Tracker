@@ -250,6 +250,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val draft by vm.draft.collectAsState()
+    val headFirst by vm.headFirst.collectAsState()
     val accs by vm.accounts.collectAsState()
     val heads by vm.visibleCategories.collectAsState()
     val usage by vm.usage.collectAsState()
@@ -257,6 +258,8 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val recents by vm.recents.collectAsState()
     val merchants by vm.merchantNames.collectAsState()
     val people by vm.persons.collectAsState()
+    val groups by vm.groups.collectAsState()
+    val groupMembers by vm.groupMembers.collectAsState()
     val trips by vm.trips.collectAsState()
     val latest by vm.prefs.latestTag.collectAsState()
     val target by vm.settingsTarget.collectAsState()
@@ -353,11 +356,20 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
             }
         }
 
-        draft?.let { d ->
+        headFirst?.let { first ->
+            val kind = if (first.type == "INCOME") "INCOME" else "EXPENSE"
+            HeadsSheet(
+                heads = heads, initialKind = kind, selected = null, usage = usage,
+                likely = { vm.likely(it) }, showKindSwitch = false,
+                label = "New entry", hint = "Pick a head first — amount and details come next.",
+                onPick = { name, k -> vm.pickHead(name, k) },
+                onDismiss = { vm.cancelHeadFirst() }
+            )
+        } ?: draft?.let { d ->
             AddEditTransactionSheet(
                 d, accs, heads, usage, likely = { vm.likely(it) }, recents = recents, merchantNames = merchants,
                 lookup = { vm.lookup(it) },
-                people = people, trips = trips,
+                people = people, groups = groups, groupMembers = groupMembers, trips = trips,
                 lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },
                 onAddPerson = { n, cb -> vm.addPerson(n, cb) },
                 onAddHead = { n, k, ic -> vm.addHead(n, k, ic) },

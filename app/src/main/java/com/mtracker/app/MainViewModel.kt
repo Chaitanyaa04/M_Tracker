@@ -153,6 +153,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val draft = MutableStateFlow<Draft?>(null)
+    /** First step of a new entry: choose a head before the full form opens. */
+    val headFirst = MutableStateFlow<Draft?>(null)
     val locked = MutableStateFlow(false)
     val settingsTarget = MutableStateFlow<String?>(null)
 
@@ -176,9 +178,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun firstAcc() = accounts.value.firstOrNull { it.isDefault && !it.archived }?.id
         ?: accounts.value.firstOrNull { !it.archived }?.id ?: 0L
 
-    fun newDraft(type: String = "EXPENSE", tripId: Long = 0) { draft.value = Draft(type = type, accountId = firstAcc(), tripId = tripId) }
+    private fun draftFor(type: String, accountId: Long, tripId: Long, pendingId: Long) = Draft(
+        type = type, accountId = if (accountId != 0L) accountId else firstAcc(),
+        tripId = tripId, pendingId = pendingId
+    )
+
+    /** Only one entry surface is ever open: the head tray or the full form. */
+    private fun openEntry(base: Draft, headStep: Boolean) {
+        headFirst.value = null
+        draft.value = null
+        if (headStep) headFirst.value = base else draft.value = base
+    }
+
+    /** New entries ask for a head first; transfers go straight to the two-account form. */
+    fun newDraft(type: String = "EXPENSE", tripId: Long = 0) =
+        openEntry(draftFor(type, 0L, tripId, 0L), type != "TRANSFER")
+
+    fun pickHead(name: String, kind: String) {
+        val base = headFirst.value ?: return
+        headFirst.value = null
+        draft.value = base.copy(type = kind, category = name)
+    }
+
+    fun cancelHeadFirst() { headFirst.value = null }
 
     fun edit(t: Txn) {
+        headFirst.value = null
         draft.value = Draft(
             id = t.id, type = t.type, amount = fmtAmt(t.amount), merchant = t.merchant, note = t.note, date = t.date,
             category = t.category, accountId = t.accountId, toAccountId = t.toAccountId ?: 0, tag = t.tag, exclude = t.excludeFromBudget,
@@ -189,13 +214,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    /** A payment prompt opens an empty draft: you enter the amount and merchant yourself. */
-    fun fromReminder(type: String, accountId: Long, pendingId: Long) {
-        draft.value = Draft(
-            type = type, accountId = if (accountId != 0L) accountId else firstAcc(),
-            pendingId = pendingId
-        )
-    }
+    /** A payment prompt opens the head tray first; amount and merchant are entered manually. */
+    fun fromReminder(type: String, accountId: Long, pendingId: Long) =
+        openEntry(draftFor(type, accountId, 0L, pendingId), type != "TRANSFER")
 
     fun fromPending(p: Pending, type: String) = fromReminder(type, p.accountId, p.id)
 
