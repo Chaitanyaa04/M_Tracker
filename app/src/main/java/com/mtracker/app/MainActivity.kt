@@ -262,6 +262,7 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
     val recents by vm.recents.collectAsState()
     val merchants by vm.merchantNames.collectAsState()
     val people by vm.persons.collectAsState()
+    val trips by vm.trips.collectAsState()
     val latest by vm.prefs.latestTag.collectAsState()
     val target by vm.settingsTarget.collectAsState()
     LaunchedEffect(target) { target?.let { settingsStart = it; showSettings = true; vm.settingsTarget.value = null } }
@@ -362,7 +363,8 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
             AddEditTransactionSheet(
                 d, accs, heads, usage, likely = { vm.likely(it) }, recents = recents, merchantNames = merchants,
                 lookup = { vm.lookup(it) },
-                people = people, lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },
+                people = people, trips = trips,
+                lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },
                 onAddPerson = { n, cb -> vm.addPerson(n, cb) },
                 onAddHead = { n, k, ic -> vm.addHead(n, k, ic) },
                 onDismiss = { vm.draft.value = null },

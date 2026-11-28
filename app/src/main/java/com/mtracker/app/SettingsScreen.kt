@@ -550,7 +550,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
                 Instant.ofEpochMilli(b.exportedAt).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a", Locale.ENGLISH))
             "Exported $whenText · ${b.accounts} accounts · ${b.transactions} transactions · ${b.persons} people\n" +
                 "${b.heads} heads · ${b.budgets} budgets · ${b.recurring} repeats · ${b.pending} prompts · ${b.dayMarks} day marks\n" +
-                "${b.deleted} in recycle bin · ${b.history} history entries · ${b.groups} occasions"
+                "${b.deleted} in recycle bin · ${b.history} history entries · ${b.groups} occasions · ${b.trips} trips"
         } ?: if (previewError.isNotBlank()) "Backup check failed: $previewError" else "Checking backup…"
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,

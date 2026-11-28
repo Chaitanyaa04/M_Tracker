@@ -57,6 +57,7 @@ data class Draft(
     val personId: Long = 0,
     val split: String = "TAG",
     val share: String = "",
+    val tripId: Long = 0,
     val createdAt: Long = 0
 )
 
@@ -94,6 +95,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val groups = repo.groups.eager(emptyList())
     val groupMembers = repo.groupMembers.eager(emptyList())
     val groupDebts = repo.groupDebts.eager(emptyList())
+    val trips = repo.trips.eager(emptyList())
+    val tripMembers = repo.tripMembers.eager(emptyList())
+    val tripDebts = repo.tripDebts.eager(emptyList())
     val peopleNames = persons.map { l -> l.associate { it.id to it.name } }.eager(emptyMap())
     /** personId -> balance. Positive = they owe you, negative = you owe them. */
     val personBalances = txns.map { l -> l.filter { it.personId != 0L }.groupBy { it.personId }.mapValues { e -> e.value.sumOf { it.owed } } }.eager(emptyMap())
@@ -159,7 +163,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun firstAcc() = accounts.value.firstOrNull { it.isDefault && !it.archived }?.id
         ?: accounts.value.firstOrNull { !it.archived }?.id ?: 0L
 
-    fun newDraft(type: String = "EXPENSE") { draft.value = Draft(type = type, accountId = firstAcc()) }
+    fun newDraft(type: String = "EXPENSE", tripId: Long = 0) { draft.value = Draft(type = type, accountId = firstAcc(), tripId = tripId) }
 
     fun edit(t: Txn) {
         draft.value = Draft(
@@ -168,7 +172,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             routeFrom = t.routeFrom, routeTo = t.routeTo, items = t.items, personId = t.personId,
             split = if (t.personId == 0L || t.owed == 0.0) "TAG" else if (t.owed >= t.amount - 0.005) "FULL" else "SPLIT",
             share = if (t.owed > 0) fmtAmt(t.owed) else "",
-            createdAt = t.createdAt
+            tripId = t.tripId, createdAt = t.createdAt
         )
     }
 
@@ -322,4 +326,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         repo.settlePerson(t)
     }
+
+    // ---------- trips ----------
+
+    fun saveTrip(
+        id: Long, name: String, place: String, startDate: Long, endDate: Long,
+        budget: Double, note: String, members: List<Long>,
+        done: (Long) -> Unit = {}, fail: (String) -> Unit = {}
+    ) = viewModelScope.launch {
+        runCatching { repo.saveTrip(id, name, place, startDate, endDate, budget, note, members) }
+            .onSuccess(done)
+            .onFailure { fail(it.message ?: "Could not save the trip.") }
+    }
+
+    fun setTripArchived(id: Long, archived: Boolean) = viewModelScope.launch { repo.setTripArchived(id, archived) }
+    fun deleteTrip(id: Long) = viewModelScope.launch { repo.deleteTrip(id) }
+
+    fun addTripExpense(
+        tripId: Long, title: String, amount: Double, payer: Long, participants: List<Long>,
+        weights: Map<Long, Double>, accountId: Long, date: Long,
+        done: () -> Unit = {}, fail: (String) -> Unit = {}
+    ) = viewModelScope.launch {
+        runCatching { repo.addTripExpense(tripId, title, amount, payer, participants, weights, accountId, date) }
+            .onSuccess { done() }
+            .onFailure { fail(it.message ?: "Could not save the expense.") }
+    }
+
+    fun settleTripDebt(debt: TripDebt, accountId: Long, note: String, done: () -> Unit = {}, fail: (String) -> Unit = {}) =
+        viewModelScope.launch {
+            runCatching { repo.settleTripDebt(debt, accountId, note) }
+                .onSuccess { done() }
+                .onFailure { fail(it.message ?: "Could not settle this debt.") }
+        }
 }

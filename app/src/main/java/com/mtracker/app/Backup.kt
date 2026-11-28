@@ -39,7 +39,8 @@ data class BackupPreview(
     val dayMarks: Int,
     val deleted: Int,
     val history: Int,
-    val groups: Int
+    val groups: Int,
+    val trips: Int
 )
 
 private data class ParsedBackup(
@@ -56,7 +57,10 @@ private data class ParsedBackup(
     val history: List<ChangeHistory>,
     val groups: List<OccasionGroup>,
     val groupMembers: List<GroupMember>,
-    val groupDebts: List<GroupDebt>
+    val groupDebts: List<GroupDebt>,
+    val trips: List<Trip>,
+    val tripMembers: List<TripMember>,
+    val tripDebts: List<TripDebt>
 )
 
 /** Full-fidelity local backup, including the local Recycle Bin and change history. */
@@ -136,8 +140,9 @@ object BackupManager {
         val pendings = d.allPending(); val marks = d.allDayMarks()
         val deleted = d.allDeletedTxns(); val history = d.allChangeHistory()
         val groups = d.allGroups(); val groupMembers = d.allGroupMembers(); val groupDebts = d.allGroupDebts()
+        val trips = d.allTrips(); val tripMembers = d.allTripMembers(); val tripDebts = d.allTripDebts()
         JSONObject().apply {
-            put("app", "Arthak"); put("schema", 6); put("exportedAt", System.currentTimeMillis())
+            put("app", "Arthak"); put("schema", 7); put("exportedAt", System.currentTimeMillis())
             put("accounts", JSONArray().also { a -> accs.forEach {
                 a.put(JSONObject().put("id", it.id).put("name", it.name).put("type", it.type)
                     .put("opening", it.openingBalance).put("color", it.color)
@@ -147,7 +152,8 @@ object BackupManager {
                 a.put(JSONObject().put("id", it.id).put("type", it.type).put("amount", it.amount).put("merchant", it.merchant)
                     .put("note", it.note).put("date", it.date).put("category", it.category).put("account", it.accountId)
                     .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget).put("created", it.createdAt)
-                    .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items))
+                    .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items)
+                    .put("trip", it.tripId))
             } })
             put("persons", JSONArray().also { a -> persons.forEach {
                 a.put(JSONObject().put("id", it.id).put("name", it.name).put("rel", it.relation).put("phone", it.phone)
@@ -173,7 +179,7 @@ object BackupManager {
                     .put("note", it.note).put("date", it.date).put("category", it.category).put("account", it.accountId)
                     .put("to", it.toAccountId ?: JSONObject.NULL).put("tag", it.tag).put("exclude", it.excludeFromBudget).put("created", it.createdAt)
                     .put("person", it.personId).put("owed", it.owed).put("from", it.routeFrom).put("toPlace", it.routeTo).put("items", it.items)
-                    .put("deletedAt", it.deletedAt))
+                    .put("trip", it.tripId).put("deletedAt", it.deletedAt))
             } })
             put("history", JSONArray().also { a -> history.forEach {
                 a.put(JSONObject().put("id", it.id).put("entity", it.entity).put("entityId", it.entityId)
@@ -189,6 +195,20 @@ object BackupManager {
                 a.put(JSONObject().put("id", it.id).put("group", it.groupId).put("from", it.fromPersonId)
                     .put("to", it.toPersonId).put("amount", it.amount).put("settled", it.settled))
             } })
+            put("trips", JSONArray().also { a -> trips.forEach {
+                a.put(JSONObject().put("id", it.id).put("name", it.name).put("place", it.place)
+                    .put("start", it.startDate).put("end", it.endDate).put("budget", it.budget)
+                    .put("note", it.note).put("archived", it.archived).put("created", it.createdAt)
+                    .put("spent", it.spent))
+            } })
+            put("tripMembers", JSONArray().also { a -> tripMembers.forEach {
+                a.put(JSONObject().put("trip", it.tripId).put("person", it.personId))
+            } })
+            put("tripDebts", JSONArray().also { a -> tripDebts.forEach {
+                a.put(JSONObject().put("id", it.id).put("trip", it.tripId).put("from", it.fromPersonId)
+                    .put("to", it.toPersonId).put("amount", it.amount).put("settled", it.settled)
+                    .put("note", it.note).put("created", it.createdAt))
+            } })
         }.toString()
     }
 
@@ -197,7 +217,7 @@ object BackupManager {
         val json = if (isEncrypted(rawJson)) decrypt(rawJson, passphrase.orEmpty()) else rawJson
         val o = JSONObject(json)
         require(o.optString("app") in listOf("Arthak", "M_Tracker")) { "Not an Arthak backup." }
-        require(o.optInt("schema", 2) in 2..6) { "Unsupported backup version." }
+        require(o.optInt("schema", 2) in 2..7) { "Unsupported backup version." }
 
         fun JSONObject.toOrNull(k: String): Long? = if (isNull(k)) null else getLong(k)
         fun JSONObject.doubleOrNull(k: String): Double? = if (isNull(k)) null else getDouble(k)
@@ -224,6 +244,9 @@ object BackupManager {
         val groupArr = o.optJSONArray("groups") ?: JSONArray()
         val groupMemberArr = o.optJSONArray("groupMembers") ?: JSONArray()
         val groupDebtArr = o.optJSONArray("groupDebts") ?: JSONArray()
+        val tripArr = o.optJSONArray("trips") ?: JSONArray()
+        val tripMemberArr = o.optJSONArray("tripMembers") ?: JSONArray()
+        val tripDebtArr = o.optJSONArray("tripDebts") ?: JSONArray()
 
         require(accArr.length() in 1..MAX_ACCOUNTS) { "Invalid account count in backup." }
         require(txnArr.length() <= MAX_TXNS) { "Backup exceeds maximum transaction count." }
@@ -232,6 +255,7 @@ object BackupManager {
             pendingArr.length() <= MAX_OTHER && markArr.length() <= MAX_PERSONS) { "Backup exceeds allowed metadata limits." }
         require(deletedArr.length() <= MAX_TXNS && historyArr.length() <= MAX_HISTORY) { "Backup exceeds local history limits." }
         require(groupArr.length() <= MAX_OTHER && groupMemberArr.length() <= MAX_TXNS && groupDebtArr.length() <= MAX_TXNS) { "Backup exceeds group limits." }
+        require(tripArr.length() <= MAX_OTHER && tripMemberArr.length() <= MAX_TXNS && tripDebtArr.length() <= MAX_TXNS) { "Backup exceeds trip limits." }
 
         val accs = (0 until accArr.length()).map { accArr.getJSONObject(it) }.map {
             val name = it.getString("name").trim()
@@ -274,7 +298,8 @@ object BackupManager {
                 it.getLong("id"), type, amt, it.getString("merchant").take(120), it.getString("note").take(500), date,
                 it.getString("category").take(80), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
                 it.optLong("created", 0).coerceIn(0L, MAX_EPOCH_MS), it.optLong("person", 0), owed,
-                it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000)
+                it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000),
+                it.optLong("trip", 0)
             )
         }
 
@@ -345,7 +370,8 @@ object BackupManager {
                 it.getString("category").take(80), accId, toId, it.getString("tag").take(60), it.getBoolean("exclude"),
                 it.optLong("created", 0).coerceIn(0L, MAX_EPOCH_MS), it.optLong("person", 0),
                 owed,
-                it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000), deletedAt
+                it.optString("from", "").take(100), it.optString("toPlace", "").take(100), it.optString("items", "").take(8_000), deletedAt,
+                it.optLong("trip", 0)
             )
         }
 
@@ -389,6 +415,47 @@ object BackupManager {
             GroupDebt(it.getLong("id"), gid, from, to, amount, it.optBoolean("settled", false))
         }
 
+        val trips = (0 until tripArr.length()).map { tripArr.getJSONObject(it) }.map {
+            val name = it.getString("name").trim()
+            require(name.isNotEmpty() && name.length <= 80) { "Invalid trip name." }
+            val start = it.getLong("start")
+            val end = it.getLong("end")
+            require(start in MIN_EPOCH_MS..MAX_EPOCH_MS && end in start..MAX_EPOCH_MS) { "Trip dates out of range." }
+            val budget = requireFinite(it.optDouble("budget", 0.0), "trip budget")
+            require(budget >= 0.0 && budget <= 1_000_000_000.0) { "Invalid trip budget." }
+            val spent = requireFinite(it.optDouble("spent", 0.0), "trip spent")
+            require(spent >= 0.0 && spent <= 1_000_000_000.0) { "Invalid trip spent." }
+            Trip(it.getLong("id"), name, it.optString("place", "").take(80), start, end, budget,
+                it.optString("note", "").take(300), it.optBoolean("archived", false),
+                it.optLong("created", 0L).coerceIn(0L, MAX_EPOCH_MS), spent)
+        }
+        val tripIds = trips.map { it.id }.toSet()
+        val tripMembers = (0 until tripMemberArr.length()).map { tripMemberArr.getJSONObject(it) }.map {
+            val tid = it.getLong("trip")
+            val pid = it.getLong("person")
+            require(tid in tripIds && (pid == 0L || pid in personIds)) { "Trip member references a missing row." }
+            TripMember(tid, pid)
+        }
+        val tripMemberPairs = tripMembers.map { it.tripId to it.personId }.toSet()
+        val tripDebts = (0 until tripDebtArr.length()).map { tripDebtArr.getJSONObject(it) }.map {
+            val tid = it.getLong("trip")
+            val from = it.getLong("from")
+            val to = it.getLong("to")
+            require(tid in tripIds) { "Trip debt references a missing trip." }
+            require(from != to && (from == 0L || from in personIds) && (to == 0L || to in personIds)) {
+                "Trip debt references a missing person."
+            }
+            if (from != 0L) require((tid to from) in tripMemberPairs) { "Trip debtor is not in this trip." }
+            if (to != 0L) require((tid to to) in tripMemberPairs) { "Trip creditor is not in this trip." }
+            val amount = requireFinite(it.getDouble("amount"), "trip debt amount")
+            require(amount > 0.0 && amount <= 1_000_000_000.0) { "Invalid trip debt amount." }
+            TripDebt(it.getLong("id"), tid, from, to, amount, it.optBoolean("settled", false),
+                it.optString("note", "").take(200), it.optLong("created", 0L).coerceIn(0L, MAX_EPOCH_MS))
+        }
+        // Older backups have no trips, so every legacy link is zero and passes this check.
+        require(txns.all { it.tripId == 0L || it.tripId in tripIds }) { "Transaction references a missing trip." }
+        require(deleted.all { it.tripId == 0L || it.tripId in tripIds }) { "Recycled transaction references a missing trip." }
+
         fun requireUnique(ids: List<Long>, label: String) {
             require(ids.size == ids.toSet().size) { "Duplicate $label id in backup." }
         }
@@ -401,7 +468,10 @@ object BackupManager {
         requireUnique(history.map { it.id }, "history")
         requireUnique(groups.map { it.id }, "group")
         requireUnique(groupDebts.map { it.id }, "group debt")
+        requireUnique(trips.map { it.id }, "trip")
+        requireUnique(tripDebts.map { it.id }, "trip debt")
         require(groupMembers.map { it.groupId to it.personId }.toSet().size == groupMembers.size) { "Duplicate group member in backup." }
+        require(tripMemberPairs.size == tripMembers.size) { "Duplicate trip member in backup." }
         require(budgets.map { it.name }.toSet().size == budgets.size) { "Duplicate budget name in backup." }
         require(cats.map { it.name to it.kind }.toSet().size == cats.size) { "Duplicate head in backup." }
         require(marks.map { it.date }.toSet().size == marks.size) { "Duplicate day mark in backup." }
@@ -410,7 +480,7 @@ object BackupManager {
         }
 
         return ParsedBackup(o.optLong("exportedAt", 0L), accs, txns, persons, budgets, cats, recs, pending, marks,
-            deleted, history, groups, groupMembers, groupDebts)
+            deleted, history, groups, groupMembers, groupDebts, trips, tripMembers, tripDebts)
     }
 
     /** Validate and summarise before asking the user to confirm a restore. */
@@ -418,7 +488,7 @@ object BackupManager {
         val b = parse(rawJson, passphrase)
         return BackupPreview(b.exportedAt, b.accounts.size, b.txns.size, b.persons.size,
             b.budgets.size, b.cats.size, b.recs.size, b.pending.size, b.dayMarks.size,
-            b.deleted.size, b.history.size, b.groups.size)
+            b.deleted.size, b.history.size, b.groups.size, b.trips.size)
     }
 
     /** Replaces everything with the backup's contents. Supports encrypted and legacy plaintext backups. */
@@ -429,6 +499,7 @@ object BackupManager {
             d.clearTxns(); d.clearPersons(); d.clearRecurring(); d.clearAccounts(); d.clearBudgets()
             d.clearCategories(); d.clearPending(); d.clearDayMarks(); d.clearDeletedTxnsAll(); d.clearHistory()
             d.clearGroupDebts(); d.clearGroupMembers(); d.clearGroups()
+            d.clearTripDebts(); d.clearTripMembers(); d.clearTrips()
             b.accounts.forEach { d.insertAccount(it) }
             b.txns.forEach { d.insert(it) }
             b.budgets.forEach { d.upsertBudget(it) }
@@ -442,6 +513,9 @@ object BackupManager {
             b.groups.forEach { d.insertGroup(it) }
             b.groupMembers.forEach { d.insertGroupMember(it) }
             b.groupDebts.forEach { d.insertGroupDebt(it) }
+            b.trips.forEach { d.insertTrip(it) }
+            b.tripMembers.forEach { d.insertTripMember(it) }
+            b.tripDebts.forEach { d.insertTripDebt(it) }
         }
         b.txns.size
     }

@@ -108,11 +108,23 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+/** v8: full trips, their people/debts, and a safe transaction-to-trip link. */
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN tripId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE deleted_txns ADD COLUMN tripId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `trips` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `place` TEXT NOT NULL, `startDate` INTEGER NOT NULL, `endDate` INTEGER NOT NULL, `budget` REAL NOT NULL, `note` TEXT NOT NULL, `archived` INTEGER NOT NULL DEFAULT 0, `createdAt` INTEGER NOT NULL, `spent` REAL NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `trip_members` (`tripId` INTEGER NOT NULL, `personId` INTEGER NOT NULL, PRIMARY KEY(`tripId`, `personId`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `trip_debts` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `tripId` INTEGER NOT NULL, `fromPersonId` INTEGER NOT NULL, `toPersonId` INTEGER NOT NULL, `amount` REAL NOT NULL, `settled` INTEGER NOT NULL DEFAULT 0, `note` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)")
+    }
+}
+
 @Database(
     entities = [Account::class, Txn::class, Budget::class, Pending::class, Recurring::class,
         Category::class, DayMark::class, Person::class, DeletedTxn::class, ChangeHistory::class,
-        OccasionGroup::class, GroupMember::class, GroupDebt::class],
-    version = 7, exportSchema = false
+        OccasionGroup::class, GroupMember::class, GroupDebt::class,
+        Trip::class, TripMember::class, TripDebt::class],
+    version = 8, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun dao(): LedgerDao
@@ -122,7 +134,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun get(c: Context): AppDatabase = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(c.applicationContext, AppDatabase::class.java, "ledger.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .addCallback(object : RoomDatabase.Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         db.execSQL("INSERT INTO accounts(name,type,openingBalance,color,archived,isDefault) VALUES('Cash','CASH',0.0,2,0,1)")

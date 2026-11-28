@@ -50,8 +50,10 @@ fun LedgerScreen(
     val streak by vm.streak.collectAsState()
     val budgets by vm.budgets.collectAsState()
     val people by vm.peopleNames.collectAsState()
+    val trips by vm.trips.collectAsState()
     val showDaily by vm.prefs.showDailyCard.collectAsState()
     val names = remember(accs) { accs.associate { it.id to it.name } }
+    val tripNames = remember(trips) { trips.associate { it.id to it.name } }
     var offset by rememberSaveable { mutableIntStateOf(0) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -66,7 +68,8 @@ fun LedgerScreen(
     val isSearch = searching && q.isNotEmpty()
     val shown = if (isSearch) txns.filter { t ->
         t.merchant.contains(q, true) || t.note.contains(q, true) || t.category.contains(q, true) ||
-            t.tag.contains(q, true) || (names[t.accountId] ?: "").contains(q, true) || fmtAmt(t.amount).contains(q)
+            t.tag.contains(q, true) || (names[t.accountId] ?: "").contains(q, true) ||
+            (tripNames[t.tripId] ?: "").contains(q, true) || fmtAmt(t.amount).contains(q)
     } else inMonth
     val groups = remember(shown) { shown.groupBy { it.date }.entries.toList() }
     val monthName = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH).format(sel)
@@ -148,7 +151,7 @@ fun LedgerScreen(
             item(key = "g$date") {
                 Panel(Modifier.padding(horizontal = 16.dp)) {
                     list.forEachIndexed { i, t ->
-                        TxnRow(t, names, people, onClick = { if (!t.type.startsWith("PERSON")) vm.edit(t) }, onDelete = { onDelete(t) }, divider = i < list.lastIndex)
+                        TxnRow(t, names, people, tripNames, onClick = { if (!t.type.startsWith("PERSON")) vm.edit(t) }, onDelete = { onDelete(t) }, divider = i < list.lastIndex)
                     }
                 }
             }
@@ -201,7 +204,7 @@ fun StatusPill(s: DetectStatus, onClick: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TxnRow(
-    t: Txn, names: Map<Long, String>, people: Map<Long, String>, onClick: () -> Unit, onDelete: () -> Unit,
+    t: Txn, names: Map<Long, String>, people: Map<Long, String>, tripNames: Map<Long, String>, onClick: () -> Unit, onDelete: () -> Unit,
     modifier: Modifier = Modifier, divider: Boolean = true
 ) {
     val state = rememberSwipeToDismissBoxState(confirmValueChange = {
@@ -232,6 +235,7 @@ fun TxnRow(
                 else -> listOfNotNull(
                     t.merchant.takeIf { it.isNotBlank() && it != title }, t.category, names[t.accountId],
                     if (t.routeFrom.isNotBlank()) "${t.routeFrom} → ${t.routeTo}" else null,
+                    tripNames[t.tripId]?.let { "trip: $it" },
                     if (n > 0) "$n items" else null,
                     who?.let { w -> if (t.owed >= t.amount - 0.005 && t.owed > 0) "$w owes all" else if (t.owed > 0) "split with $w" else "with $w" },
                     t.tag.takeIf { it.isNotBlank() }?.let { "#$it" },

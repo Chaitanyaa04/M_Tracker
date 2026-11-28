@@ -90,7 +90,7 @@ private fun loadPersonPhoto(c: Context, name: String, target: Int = 128) = runCa
 }.getOrNull()
 
 @Composable
-private fun Avatar(name: String, file: String = "", size: Int = 44, selected: Boolean = false) {
+fun Avatar(name: String, file: String = "", size: Int = 44, selected: Boolean = false) {
     val ctx = LocalContext.current
     val bmp = remember(file, size) { loadPersonPhoto(ctx, file, size * 2) }
     val shape = CircleShape
@@ -130,6 +130,7 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     val groups by vm.groups.collectAsState()
     val groupMembers by vm.groupMembers.collectAsState()
     val groupDebts by vm.groupDebts.collectAsState()
+    val tripDebts by vm.tripDebts.collectAsState()
     val hide by vm.prefs.hideBalances.collectAsState()
     var openId by rememberSaveable { mutableLongStateOf(0L) }
     var adding by remember { mutableStateOf(false) }
@@ -139,6 +140,7 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     var groupError by remember { mutableStateOf("") }
     var openGroupId by remember { mutableLongStateOf(0L) }
     var groupSettleError by remember { mutableStateOf("") }
+    var deletePersonId by remember { mutableLongStateOf(0L) }
     val ctx = LocalContext.current
     var dialog by remember { mutableStateOf<String?>(null) }
     fun m(s: String) = if (hide) "••••" else s
@@ -288,7 +290,7 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
                 }
             }
             if (abs(b) < 0.005) item {
-                Box(Modifier.padding(24.dp)) { Cap("Remove ${person.name}", Modifier.clickable { vm.deletePerson(person.id); openId = 0 }.padding(8.dp), color = L.red) }
+                Box(Modifier.padding(24.dp)) { Cap("Remove ${person.name}", Modifier.clickable { deletePersonId = person.id }.padding(8.dp), color = L.red) }
             }
             item { Spacer(Modifier.height(110.dp)) }
         }
@@ -298,8 +300,31 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
     if (editingPerson && person != null) PersonDialog(
         person, abs(bal[person.id] ?: 0.0) < 0.005, { editingPerson = false },
         { vm.savePerson(it); editingPerson = false },
-        { vm.deletePerson(person.id); openId = 0; editingPerson = false }
+        { deletePersonId = person.id; openId = 0; editingPerson = false }
     )
+
+    if (deletePersonId != 0L) {
+        val target = people.firstOrNull { it.id == deletePersonId }
+        val tripCount = tripDebts.count { it.fromPersonId == deletePersonId || it.toPersonId == deletePersonId }
+        AlertDialog(
+            onDismissRequest = { deletePersonId = 0L }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
+            title = { Cap("Remove ${target?.name ?: "person"}?", color = L.text) },
+            text = {
+                Text("Their entries stay in your ledger but lose the person label. " +
+                    (if (tripCount > 0) "This also erases $tripCount trip debt(s). This cannot be undone."
+                    else "This cannot be undone."),
+                    color = L.muted, fontSize = 13.sp, lineHeight = 18.sp)
+            },
+            confirmButton = {
+                TextButton({
+                    vm.deletePerson(deletePersonId)
+                    deletePersonId = 0L
+                    openId = 0L
+                }) { Text("Remove", color = L.red) }
+            },
+            dismissButton = { TextButton({ deletePersonId = 0L }) { Text("Cancel") } }
+        )
+    }
 
     if (rare) AlertDialog(
         onDismissRequest = { rare = false }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),

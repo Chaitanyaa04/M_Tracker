@@ -35,7 +35,8 @@ data class Txn(
     val owed: Double = 0.0,
     val routeFrom: String = "",
     val routeTo: String = "",
-    val items: String = ""
+    val items: String = "",
+    @ColumnInfo(defaultValue = "0") val tripId: Long = 0
 )
 
 /** name = category name, or "__overall__" for the overall monthly budget. */
@@ -113,7 +114,8 @@ data class DeletedTxn(
     val routeFrom: String = "",
     val routeTo: String = "",
     val items: String = "",
-    val deletedAt: Long
+    val deletedAt: Long,
+    @ColumnInfo(defaultValue = "0") val tripId: Long = 0
 )
 
 /** A rare occasion (trip, dinner, party) whose bill is split between selected people. */
@@ -138,6 +140,38 @@ data class GroupDebt(
     val toPersonId: Long,
     val amount: Double,
     @ColumnInfo(defaultValue = "0") val settled: Boolean = false
+)
+
+/** An offline trip with its own budget, dates and people. Archived trips stay recoverable. */
+@Entity(tableName = "trips")
+data class Trip(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val place: String = "",
+    val startDate: Long,
+    val endDate: Long,
+    val budget: Double = 0.0,
+    val note: String = "",
+    @ColumnInfo(defaultValue = "0") val archived: Boolean = false,
+    val createdAt: Long,
+    @ColumnInfo(defaultValue = "0") val spent: Double = 0.0
+)
+
+/** Trip participant. personId 0 means you, so you do not need a Person row. */
+@Entity(tableName = "trip_members", primaryKeys = ["tripId", "personId"])
+data class TripMember(val tripId: Long, val personId: Long)
+
+/** One direction of a trip debt; settled rows stay visible in the trip audit. */
+@Entity(tableName = "trip_debts")
+data class TripDebt(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: Long,
+    val fromPersonId: Long,
+    val toPersonId: Long,
+    val amount: Double,
+    @ColumnInfo(defaultValue = "0") val settled: Boolean = false,
+    val note: String = "",
+    val createdAt: Long = 0
 )
 
 /** Small local audit trail: what changed, when, and the previous value as JSON. */

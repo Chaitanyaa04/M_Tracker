@@ -25,19 +25,22 @@ class Repository(private val db: AppDatabase) {
     val groups = d.groups()
     val groupMembers = d.allGroupMembersFlow()
     val groupDebts = d.groupDebts()
+    val trips = d.trips()
+    val tripMembers = d.tripMembers()
+    val tripDebts = d.tripDebts()
 
     private fun Txn.asJson() = JSONObject()
         .put("id", id).put("type", type).put("amount", amount).put("merchant", merchant)
         .put("note", note).put("date", date).put("category", category).put("account", accountId)
         .put("to", toAccountId ?: JSONObject.NULL).put("tag", tag).put("exclude", excludeFromBudget)
         .put("created", createdAt).put("person", personId).put("owed", owed)
-        .put("from", routeFrom).put("toPlace", routeTo).put("items", items)
+        .put("from", routeFrom).put("toPlace", routeTo).put("items", items).put("trip", tripId)
 
     private fun Txn.asDeleted() = DeletedTxn(
         id = id, type = type, amount = amount, merchant = merchant, note = note, date = date,
         category = category, accountId = accountId, toAccountId = toAccountId, tag = tag,
         excludeFromBudget = excludeFromBudget, createdAt = createdAt, personId = personId,
-        owed = owed, routeFrom = routeFrom, routeTo = routeTo, items = items,
+        owed = owed, routeFrom = routeFrom, routeTo = routeTo, items = items, tripId = tripId,
         deletedAt = System.currentTimeMillis()
     )
 
@@ -45,7 +48,7 @@ class Repository(private val db: AppDatabase) {
         id = id, type = type, amount = amount, merchant = merchant, note = note, date = date,
         category = category, accountId = accountId, toAccountId = toAccountId, tag = tag,
         excludeFromBudget = excludeFromBudget, createdAt = createdAt, personId = personId,
-        owed = owed, routeFrom = routeFrom, routeTo = routeTo, items = items
+        owed = owed, routeFrom = routeFrom, routeTo = routeTo, items = items, tripId = tripId
     )
 
     private suspend fun record(entity: String, id: Long, action: String, payload: String) {
@@ -62,14 +65,27 @@ class Repository(private val db: AppDatabase) {
         }
     }
 
-    suspend fun save(t: Txn) {
+    /** Only split-generated expense rows are baked into Trip.spent; keep that counter in sync. */
+    private suspend fun adjustTripSpent(t: Txn, delta: Double) {
+        if (t.tripId == 0L || t.type != "EXPENSE" || t.tag != "trip") return
+        val trip = d.tripById(t.tripId) ?: return
+        val next = round2(trip.spent + delta)
+        if (next >= 0.0 && next <= 1_000_000_000.0) d.updateTrip(trip.copy(spent = next))
+    }
+
+    suspend fun save(t: Txn) = db.withTransaction {
         if (t.id == 0L) {
-            d.insert(if (t.createdAt == 0L) t.copy(createdAt = System.currentTimeMillis()) else t)
+            val row = if (t.createdAt == 0L) t.copy(createdAt = System.currentTimeMillis()) else t
+            d.insert(row)
+            adjustTripSpent(row, row.amount)
         } else {
             val old = d.txnById(t.id)
             if (old != null && old != t) record("TXN", t.id, "EDIT", old.asJson().toString())
             val keepCreated = if (t.createdAt == 0L) old?.createdAt ?: System.currentTimeMillis() else t.createdAt
-            d.update(t.copy(createdAt = keepCreated))
+            val row = t.copy(createdAt = keepCreated)
+            if (old != null) adjustTripSpent(old, -old.amount)
+            d.update(row)
+            adjustTripSpent(row, row.amount)
         }
     }
 
@@ -79,12 +95,14 @@ class Repository(private val db: AppDatabase) {
         t.toAccountId?.let { ensureAccount(it) }
         d.deleteDeletedTxn(t.id)
         d.insert(t)
+        adjustTripSpent(t, t.amount)
     }
 
     suspend fun delete(t: Txn) = db.withTransaction {
         d.insertDeletedTxn(t.asDeleted())
         record("TXN", t.id, "DELETE", t.asJson().toString())
         d.delete(t)
+        adjustTripSpent(t, -t.amount)
     }
 
     suspend fun restoreDeleted(item: DeletedTxn) = db.withTransaction {
@@ -94,6 +112,7 @@ class Repository(private val db: AppDatabase) {
         d.insert(t)
         d.deleteDeletedTxn(item.id)
         record("TXN", item.id, "RESTORE", t.asJson().toString())
+        adjustTripSpent(t, t.amount)
     }
 
     suspend fun deleteDeletedForever(id: Long) {
@@ -115,6 +134,7 @@ class Repository(private val db: AppDatabase) {
         d.allTxns().filter { it.accountId == id || it.toAccountId == id }.forEach { t ->
             d.insertDeletedTxn(t.asDeleted())
             record("TXN", t.id, "DELETE", t.asJson().toString())
+            adjustTripSpent(t, -t.amount)
         }
         d.deleteTxnsOfAccount(id)
         d.deleteRecurringOfAccount(id)
@@ -179,7 +199,10 @@ class Repository(private val db: AppDatabase) {
         d.allTxns().filter { it.personId == id }.forEach { t ->
             record("TXN", t.id, "PERSON_DETACH", t.asJson().toString())
         }
-        d.detachPerson(id); d.deleteGroupMembersOfPerson(id); d.deleteGroupDebtsOfPerson(id); d.deletePerson(id)
+        d.detachPerson(id)
+        d.deleteGroupMembersOfPerson(id); d.deleteGroupDebtsOfPerson(id)
+        d.deleteTripMembersOfPerson(id); d.deleteTripDebtsOfPerson(id)
+        d.deletePerson(id)
     }
     suspend fun addTxn(t: Txn) { save(t) }
     suspend fun savePerson(p: Person): Long = if (p.id == 0L) d.insertPerson(p) else { d.updatePerson(p); p.id }
@@ -300,6 +323,159 @@ class Repository(private val db: AppDatabase) {
                 record("GROUP_DEBT", debt.id, "SETTLE", JSONObject().put("amount", debt.amount).put("via", t.type).toString())
             }
         }
+        for (debt in d.openTripDebtsWith(t.personId)) {
+            if (left <= 0.005) break
+            val directionMatches = if (youPay) debt.fromPersonId == 0L else debt.fromPersonId == t.personId
+            if (!directionMatches) continue
+            val portion = minOf(debt.amount, left)
+            if (portion <= 0.005) continue
+            if (portion >= debt.amount - 0.005) {
+                if (d.settleTripDebt(debt.id, debt.note) == 1) {
+                    left -= debt.amount
+                    record("TRIP_DEBT", debt.id, "SETTLE", JSONObject().put("amount", debt.amount).put("via", t.type).toString())
+                }
+            } else {
+                val remaining = round2(debt.amount - portion)
+                if (remaining > 0.005 && d.partiallyPayTripDebt(debt.id, debt.amount, remaining) == 1) {
+                    left = round2(left - portion)
+                    record("TRIP_DEBT", debt.id, "PARTIAL", JSONObject().put("paid", portion)
+                        .put("remaining", remaining).put("via", t.type).toString())
+                }
+            }
+        }
+    }
+
+    // ---------- trips ----------
+
+    /** Creates or edits a trip. You are always a member; archived trips keep their history. */
+    suspend fun saveTrip(
+        id: Long, name: String, place: String, startDate: Long, endDate: Long,
+        budget: Double, note: String, members: List<Long>
+    ): Long = db.withTransaction {
+        val trimmed = name.trim()
+        require(trimmed.isNotBlank()) { "Trip name is required." }
+        require(startDate in 0L..4_102_444_800_000L && endDate in startDate..4_102_444_800_000L) { "Invalid trip dates." }
+        require(budget >= 0.0 && budget.isFinite() && budget <= 1_000_000_000.0) { "Invalid trip budget." }
+        val people = members.filter { it != 0L }.distinct()
+        val known = d.allPersons().map { it.id }.toSet()
+        require(people.all { it in known }) { "Trip references a missing person." }
+        val now = System.currentTimeMillis()
+        val cleanPlace = place.trim().take(80)
+        val cleanNote = note.trim().take(300)
+        val cleanName = trimmed.take(80)
+        val tid = if (id == 0L) {
+            d.insertTrip(Trip(name = cleanName, place = cleanPlace, startDate = startDate, endDate = endDate,
+                budget = round2(budget), note = cleanNote, createdAt = now))
+        } else {
+            val old = d.tripById(id) ?: throw IllegalArgumentException("Trip not found.")
+            d.updateTrip(old.copy(name = cleanName, place = cleanPlace, startDate = startDate,
+                endDate = endDate, budget = round2(budget), note = cleanNote))
+            id
+        }
+        // Nobody with an unpaid or settled debt can be dropped from the trip: that would
+        // leave a debt pointing at a non-member and make later backups fail validation.
+        val owedPeople = if (id == 0L) emptySet() else d.allTripDebts().filter { it.tripId == tid }
+            .flatMap { listOf(it.fromPersonId, it.toPersonId) }.filter { it != 0L }.toSet()
+        d.deleteTripMembers(tid)
+        (listOf(0L) + people + owedPeople).distinct().forEach { d.insertTripMember(TripMember(tid, it)) }
+        record("TRIP", tid, if (id == 0L) "CREATE" else "EDIT",
+            JSONObject().put("name", cleanName).put("people", people.size).toString())
+        tid
+    }
+
+    /** Archiving hides a trip without touching its expenses or debts. */
+    suspend fun setTripArchived(id: Long, archived: Boolean) = db.withTransaction {
+        d.setTripArchived(id, archived)
+        record("TRIP", id, if (archived) "ARCHIVE" else "RESTORE", "")
+    }
+
+    /** Permanent removal: trip metadata, members and debts go; ledger rows stay, only their trip link clears. */
+    suspend fun deleteTrip(id: Long) = db.withTransaction {
+        record("TRIP", id, "DELETE", "")
+        d.deleteTripDebts(id)
+        d.deleteTripMembers(id)
+        d.clearTxnTripLink(id)
+        d.clearDeletedTxnTripLink(id)
+        d.deleteTrip(id)
+    }
+
+    /**
+     * Records something paid on the trip. payer 0 means you paid from your account; otherwise
+     * a member paid. Every share becomes a trip debt between two members so the trip shows all
+     * of them, while the normal ledger only gets rows for debts involving you.
+     */
+    suspend fun addTripExpense(
+        tripId: Long, title: String, amount: Double, payer: Long, participants: List<Long>,
+        weights: Map<Long, Double>, accountId: Long, date: Long
+    ) = db.withTransaction {
+        val trip = d.tripById(tripId) ?: throw IllegalArgumentException("Trip not found.")
+        require(!trip.archived) { "Trip is archived." }
+        val cleanTitle = title.trim().ifBlank { "Trip expense" }
+        require(amount > 0.0 && amount.isFinite() && amount <= 1_000_000_000.0) { "Invalid amount." }
+        require(date in 0L..4_102_444_800_000L) { "Expense date out of range." }
+        val members = d.allTripMembers().filter { it.tripId == tripId }.map { it.personId }.toSet()
+        val sharesOf = participants.distinct()
+        require(sharesOf.isNotEmpty() && payer in sharesOf) { "Payer must be one of the people sharing this." }
+        require(sharesOf.all { it in members }) { "Choose people from this trip." }
+        require(weights.values.all { it >= 0.0 && it.isFinite() } && weights.values.any { it > 0.0 }) { "Invalid split weights." }
+        if (payer == 0L) require(accountId != 0L) { "Choose an account for your payment." }
+        val cents = splitCents(Math.round(amount * 100.0), sharesOf.map { it to (weights[it] ?: 1.0) })
+        val now = System.currentTimeMillis()
+        val label = cleanTitle.take(60)
+        val note = "Trip · $label"
+        sharesOf.filter { it != payer }.forEach { p ->
+            val share = cents[p] ?: 0L
+            if (share > 0L) d.insertTripDebt(TripDebt(tripId = tripId, fromPersonId = p, toPersonId = payer,
+                amount = share / 100.0, note = label, createdAt = now))
+        }
+        if (payer == 0L) {
+            val mine = cents[0L] ?: 0L
+            if (mine > 0L) d.insert(Txn(type = "EXPENSE", amount = mine / 100.0, note = note, date = date,
+                category = "Travel", accountId = accountId, tag = "trip", tripId = tripId, createdAt = now))
+            sharesOf.filter { it != 0L }.forEach { p ->
+                val share = cents[p] ?: 0L
+                if (share > 0L) d.insert(Txn(type = "EXPENSE", amount = share / 100.0, note = note, date = date,
+                    category = "Travel", accountId = accountId, personId = p, owed = share / 100.0,
+                    tripId = tripId, createdAt = now))
+            }
+        } else {
+            val mine = cents[0L] ?: 0L
+            if (mine > 0L) d.insert(Txn(type = "PERSON_ADJ", amount = mine / 100.0, note = note, date = date,
+                category = "People", accountId = 0, personId = payer, owed = -(mine / 100.0), tag = "trip",
+                tripId = tripId, createdAt = now))
+        }
+        val updatedSpent = round2(trip.spent + amount)
+        require(updatedSpent <= 1_000_000_000.0) { "Trip total is too large." }
+        d.updateTrip(trip.copy(spent = updatedSpent))
+        record("TRIP", tripId, "EXPENSE", JSONObject().put("title", label).put("amount", amount)
+            .put("payer", payer).toString())
+    }
+
+    /**
+     * Settles one trip debt. Debts involving you move real money through an account; debts
+     * between two other members are settled between them and only change the trip record.
+     */
+    suspend fun settleTripDebt(debt: TripDebt, accountId: Long, note: String) = db.withTransaction {
+        val message = note.trim().take(200)
+        val finalNote = if (message.isBlank()) debt.note else "${debt.note} · $message".take(200)
+        require(d.settleTripDebt(debt.id, finalNote) == 1) { "Debt is already settled." }
+        if (debt.fromPersonId == 0L || debt.toPersonId == 0L) {
+            require(accountId != 0L) { "Choose an account." }
+            val other = if (debt.fromPersonId == 0L) debt.toPersonId else debt.fromPersonId
+            val t = if (debt.fromPersonId == 0L) {
+                Txn(type = "PERSON_OUT", amount = debt.amount, note = message.ifBlank { "Trip · settled" },
+                    date = today(), category = "People", accountId = accountId, personId = other,
+                    owed = debt.amount, tripId = debt.tripId, createdAt = System.currentTimeMillis())
+            } else {
+                Txn(type = "PERSON_IN", amount = debt.amount, note = message.ifBlank { "Trip · settled" },
+                    date = today(), category = "People", accountId = accountId, personId = other,
+                    owed = -debt.amount, tripId = debt.tripId, createdAt = System.currentTimeMillis())
+            }
+            d.insert(t)
+        }
+        val via = if (debt.fromPersonId != 0L && debt.toPersonId != 0L) "members" else message.ifBlank { "account" }
+        record("TRIP_DEBT", debt.id, "SETTLE", JSONObject().put("amount", debt.amount)
+            .put("via", via).toString())
     }
 
     // ---------- CSV (Storage Access Framework URIs; no storage permission) ----------

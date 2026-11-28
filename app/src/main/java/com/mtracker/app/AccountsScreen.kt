@@ -313,15 +313,23 @@ fun AccountDialog(account: Account?, onDismiss: () -> Unit, onSave: (Account) ->
     )
 }
 
-/** Wallet cards for your accounts, and a Splits view for people and occasions. */
+/** Wallet cards for your accounts, a Splits view for people, and trips with their own debts. */
 @Composable
 fun AccountsScreen(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = Modifier) {
     var view by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     Column(modifier.fillMaxSize()) {
-        Row(Modifier.padding(24.dp, 4.dp, 24.dp, 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            Modifier.padding(24.dp, 4.dp, 24.dp, 8.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Chip("Wallet", view == 0) { view = 0 }
             Chip("Splits", view == 1) { view = 1 }
+            Chip("Trips", view == 2) { view = 2 }
         }
-        if (view == 0) WalletView(vm, onTransfer, Modifier.weight(1f)) else PeopleView(vm, Modifier.weight(1f))
+        when (view) {
+            0 -> WalletView(vm, onTransfer, Modifier.weight(1f))
+            1 -> PeopleView(vm, Modifier.weight(1f))
+            else -> TripsView(vm, Modifier.weight(1f))
+        }
     }
 }

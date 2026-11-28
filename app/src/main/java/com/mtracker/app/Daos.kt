@@ -146,6 +146,39 @@ interface LedgerDao {
     @Query("DELETE FROM group_debts WHERE groupId = :id") suspend fun deleteGroupDebts(id: Long)
     @Query("DELETE FROM group_debts WHERE fromPersonId = :id OR toPersonId = :id") suspend fun deleteGroupDebtsOfPerson(id: Long)
     @Query("DELETE FROM group_debts") suspend fun clearGroupDebts()
+
+    // trips
+    @Query("SELECT * FROM trips ORDER BY archived, startDate DESC, id DESC") fun trips(): Flow<List<Trip>>
+    @Query("SELECT * FROM trips") suspend fun allTrips(): List<Trip>
+    @Query("SELECT * FROM trips WHERE id = :id") suspend fun tripById(id: Long): Trip?
+    @Insert suspend fun insertTrip(t: Trip): Long
+    @Update suspend fun updateTrip(t: Trip)
+    @Query("UPDATE trips SET archived = :archived WHERE id = :id") suspend fun setTripArchived(id: Long, archived: Boolean)
+    @Query("DELETE FROM trips WHERE id = :id") suspend fun deleteTrip(id: Long)
+    @Query("DELETE FROM trips") suspend fun clearTrips()
+
+    @Query("SELECT * FROM trip_members ORDER BY tripId, personId") fun tripMembers(): Flow<List<TripMember>>
+    @Query("SELECT * FROM trip_members") suspend fun allTripMembers(): List<TripMember>
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertTripMember(m: TripMember)
+    @Query("DELETE FROM trip_members WHERE tripId = :id") suspend fun deleteTripMembers(id: Long)
+    @Query("DELETE FROM trip_members WHERE personId = :id") suspend fun deleteTripMembersOfPerson(id: Long)
+    @Query("DELETE FROM trip_members") suspend fun clearTripMembers()
+
+    @Query("SELECT * FROM trip_debts ORDER BY tripId, id") fun tripDebts(): Flow<List<TripDebt>>
+    @Query("SELECT * FROM trip_debts") suspend fun allTripDebts(): List<TripDebt>
+    @Insert suspend fun insertTripDebt(d: TripDebt): Long
+    @Query("UPDATE trip_debts SET settled = 1, note = :note WHERE id = :id AND settled = 0") suspend fun settleTripDebt(id: Long, note: String): Int
+    @Query("UPDATE trip_debts SET amount = :remaining WHERE id = :id AND settled = 0 AND amount = :was")
+    suspend fun partiallyPayTripDebt(id: Long, was: Double, remaining: Double): Int
+    @Query("SELECT * FROM trip_debts WHERE settled = 0 AND ((fromPersonId = 0 AND toPersonId = :personId) OR (fromPersonId = :personId AND toPersonId = 0)) ORDER BY tripId, id")
+    suspend fun openTripDebtsWith(personId: Long): List<TripDebt>
+    @Query("DELETE FROM trip_debts WHERE tripId = :id") suspend fun deleteTripDebts(id: Long)
+    @Query("DELETE FROM trip_debts WHERE fromPersonId = :id OR toPersonId = :id") suspend fun deleteTripDebtsOfPerson(id: Long)
+    @Query("DELETE FROM trip_debts") suspend fun clearTripDebts()
+
+    @Query("UPDATE transactions SET tripId = :tripId WHERE id = :id") suspend fun setTxnTrip(id: Long, tripId: Long)
+    @Query("UPDATE transactions SET tripId = 0 WHERE tripId = :tripId") suspend fun clearTxnTripLink(tripId: Long)
+    @Query("UPDATE deleted_txns SET tripId = 0 WHERE tripId = :tripId") suspend fun clearDeletedTxnTripLink(tripId: Long)
     @Query("SELECT * FROM transactions WHERE accountId = :id AND type = 'EXPENSE' ORDER BY createdAt DESC, id DESC LIMIT 1")
     suspend fun lastExpenseFor(id: Long): Txn?
 }

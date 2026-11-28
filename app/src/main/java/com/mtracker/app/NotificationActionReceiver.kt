@@ -35,7 +35,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     val d = db.dao()
                     val last = d.lastExpenseFor(acc)
                     if (last != null) {
-                        d.insert(last.copy(id = 0, date = today(), createdAt = System.currentTimeMillis(), personId = 0, owed = 0.0, items = "", routeFrom = "", routeTo = ""))
+                        d.insert(last.copy(id = 0, date = today(), createdAt = System.currentTimeMillis(), personId = 0, owed = 0.0, items = "", routeFrom = "", routeTo = "", tripId = 0))
                         if (pid != 0L) d.deletePending(pid)
                         ReminderNotifier.confirm(c, "${inr(last.amount)} · " + last.note.ifBlank { last.merchant }.ifBlank { last.category })
                     }

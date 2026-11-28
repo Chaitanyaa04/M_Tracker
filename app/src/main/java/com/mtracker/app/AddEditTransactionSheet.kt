@@ -154,7 +154,7 @@ private fun Receipt(items: MutableList<LineItem>, adjs: MutableList<Adj>, subtot
 fun AddEditTransactionSheet(
     d: Draft, accounts: List<Account>, heads: List<Category>, usage: Map<String, Int>, likely: (String) -> List<String>,
     recents: List<Txn>, merchantNames: List<String>, lookup: (String) -> Txn?,
-    people: List<Person>, lastTrip: () -> Txn?, places: () -> List<String>, routes: () -> List<Pair<String, String>>,
+    people: List<Person>, trips: List<Trip>, lastTrip: () -> Txn?, places: () -> List<String>, routes: () -> List<Pair<String, String>>,
     onAddPerson: (String, (Long) -> Unit) -> Unit,
     onAddHead: (String, String, String) -> Unit, onDismiss: () -> Unit, onSave: (Txn, String) -> Unit
 ) {
@@ -174,6 +174,7 @@ fun AddEditTransactionSheet(
     var routeTo by remember { mutableStateOf(d.routeTo) }
     var editingTo by remember { mutableStateOf(false) }
     var personId by remember { mutableLongStateOf(d.personId) }
+    var tripId by remember { mutableLongStateOf(d.tripId) }
     var split by remember { mutableStateOf(d.split) }
     var share by remember { mutableStateOf(d.share) }
     var shareTouched by remember { mutableStateOf(d.share.isNotBlank()) }
@@ -437,6 +438,12 @@ fun AddEditTransactionSheet(
                         Hairline()
                     }
                     if (type != "TRANSFER") Field("Tag (e.g. personal)", tag, { tag = it.replace("#", "") })
+                    if (type != "TRANSFER" && trips.isNotEmpty()) Picker(
+                        "Trip (optional)",
+                        trips.firstOrNull { it.id == tripId }?.name ?: "Not part of a trip",
+                        listOf("Not part of a trip" to 0L) + trips.map { it.name to it.id },
+                        { tripId = it }
+                    )
                     if (type == "EXPENSE") SwitchRow("Leave out of monthly budget", exclude) { exclude = it }
                     if (isNew) Picker(
                         "Repeat",
@@ -470,6 +477,7 @@ fun AddEditTransactionSheet(
                                 personId = if (type == "EXPENSE") personId else 0, owed = round2(owed),
                                 routeFrom = if (showTrip) routeFrom.trim() else "", routeTo = if (showTrip) routeTo.trim() else "",
                                 items = if (itemized && type == "EXPENSE") itemsJson(items, adjs, subtotal) else "",
+                                tripId = if (type == "TRANSFER") 0L else tripId,
                                 createdAt = d.createdAt
                             ),
                             if (isNew) repeat else "NEVER"
