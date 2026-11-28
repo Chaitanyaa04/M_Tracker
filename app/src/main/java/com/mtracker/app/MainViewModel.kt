@@ -279,14 +279,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun deletePerson(id: Long) = viewModelScope.launch {
         val old = repo.personById(id)
         repo.deletePerson(id)
-        if (old != null && old.photoUri.isNotBlank()) runCatching { File(app.filesDir, old.photoUri).delete() }
+        if (old != null && old.photoUri.isNotBlank()) runCatching { File(getApplication<Application>().filesDir, old.photoUri).delete() }
     }
 
     fun savePerson(p: Person) = viewModelScope.launch {
         val old = if (p.id == 0L) null else repo.personById(p.id)
         repo.savePerson(p)
         if (old != null && old.photoUri != p.photoUri && old.photoUri.isNotBlank()) {
-            runCatching { File(app.filesDir, old.photoUri).delete() }
+            runCatching { File(getApplication<Application>().filesDir, old.photoUri).delete() }
         }
     }
 

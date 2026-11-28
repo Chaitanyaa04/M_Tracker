@@ -155,8 +155,21 @@ The local read-only review found and these were fixed before any push:
 ### Known intentional limitation
 - Profile photos are device-local: backup stores only the safe app-private file name, not image bytes. Restoring on another device shows initials until a new photo is picked. This matches the offline/private-photo design.
 
+### CI result and follow-up fix
+- Commit `72654ba` was pushed to `main` after explicit approval.
+- CI run `46118893737` **failed at unit tests/compile** in 1m51s. No APK was built or published.
+- Exact CI errors:
+  - `MainViewModel.kt:282,289` — unresolved `app` used for photo-file cleanup;
+  - `People.kt:159,166` — bare `0` passed where Compose `Dp` is required;
+  - `People.kt:512,516,518,520` — Material 3 date-picker APIs require `@OptIn(ExperimentalMaterial3Api::class)`.
+- Local follow-up fix (uncommitted at time of writing):
+  - photo cleanup now uses `getApplication<Application>().filesDir`;
+  - padding zeros are `0.dp`;
+  - `GroupDialog` is annotated `@OptIn(ExperimentalMaterial3Api::class)`.
+- This fix still needs explicit approval before commit/push, then a fresh CI run.
+
 ### Still to verify for this batch
-- No CI has run for this batch.
+- Fresh CI must pass after the follow-up compile fix.
 - No release has been published for this batch.
 
 ## 6. User-approved roadmap still pending

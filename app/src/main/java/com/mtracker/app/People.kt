@@ -156,14 +156,14 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(Modifier.fillMaxWidth().padding(8.dp, 0, 8.dp, 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().padding(8.dp, 0.dp, 8.dp, 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column { Cap("You’ll get"); Spacer(Modifier.height(6.dp)); Num(m(inr(toGet)), size = 30.sp, weight = FontWeight.Light, color = L.green) }
                     Column { Cap("You owe"); Spacer(Modifier.height(6.dp)); Num(m(inr(toPay)), size = 30.sp, weight = FontWeight.Light, color = if (toPay > 0) L.red else L.text) }
                 }
             }
             if (groups.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
                 Column {
-                    Cap("Groups", Modifier.padding(8.dp, 0, 8.dp, 8.dp))
+                    Cap("Groups", Modifier.padding(8.dp, 0.dp, 8.dp, 8.dp))
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         groups.forEach { g ->
                             val open = groupDebts.filter { it.groupId == g.id && !it.settled }
@@ -468,6 +468,7 @@ fun PersonDialog(person: Person?, canRemove: Boolean, onDismiss: () -> Unit, onS
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupDialog(
     people: List<Person>,
