@@ -189,10 +189,7 @@ private fun AppearancePage(vm: MainViewModel, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(4.dp))
                 SwitchRow("Hide balances (••••)", hide) { p.setHide(it) }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SwitchRow("Negative as (₹…)", parens, { p.setParenNegatives(it) }, Modifier.weight(1f))
-                    InfoTip("Off shows −₹…; positive amounts stay unmarked.")
-                }
+                SwitchInfoRow("Negative as (₹…)", "Off shows −₹…; positive amounts stay unmarked.", parens) { p.setParenNegatives(it) }
                 SwitchRow("Daily safe-to-spend", showDaily) { p.setShowDailyCard(it) }
                 SwitchRow("Haptic feedback", haptics) { p.setHaptics(it) }
             }

@@ -201,18 +201,30 @@ fun Chip(t: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = L.text, fontSize = 14.sp)
-        Switch(
-            checked, onChange,
-            colors = SwitchDefaults.colors(
-                checkedTrackColor = L.accent, checkedThumbColor = L.onAccent, checkedBorderColor = Color.Transparent,
-                uncheckedTrackColor = L.border, uncheckedThumbColor = L.muted, uncheckedBorderColor = Color.Transparent
-            )
-        )
+        Switch(checked, onChange, colors = appSwitchColors())
     }
 }
+
+/** Same switch, with a compact info button beside the label. */
+@Composable
+fun SwitchInfoRow(label: String, info: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, color = L.text, fontSize = 14.sp)
+            InfoTip(info)
+        }
+        Switch(checked, onChange, colors = appSwitchColors())
+    }
+}
+
+@Composable
+private fun appSwitchColors() = SwitchDefaults.colors(
+    checkedTrackColor = L.accent, checkedThumbColor = L.onAccent, checkedBorderColor = Color.Transparent,
+    uncheckedTrackColor = L.border, uncheckedThumbColor = L.muted, uncheckedBorderColor = Color.Transparent
+)
 
 @Composable
 fun Field(

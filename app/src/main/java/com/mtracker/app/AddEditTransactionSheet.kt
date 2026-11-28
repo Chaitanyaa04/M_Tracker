@@ -52,7 +52,7 @@ data class Adj(val label: String = "", val amount: String = "", val sign: Int = 
 
 /** Same visual language as a head tile, used for people, groups and split modes. */
 @Composable
-private fun IconChoice(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, badge: String? = null) {
+private fun IconChoice(label: String, icon: ImageVector, selected: Boolean, badge: String? = null, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
