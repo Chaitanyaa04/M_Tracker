@@ -251,7 +251,7 @@ fun ConfirmDeleteAccountDialog(account: Account, onConfirm: () -> Unit, onDismis
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = L.surface,
         title = { Cap("Delete ${account.name}?", color = L.text) },
-        text = { Text("Its transactions are moved to the Recycle Bin, so they can be restored later. The account itself is archived and hidden from pickers. Repeating entries and pending prompts for this account will be removed.", color = L.muted, fontSize = 13.sp) },
+        text = { Text("Its ordinary transactions are moved to the Recycle Bin, so they can be restored later. Settlement records stay in your history so group and trip debts keep their money trail. The account itself is archived and hidden from pickers. Repeating entries and pending prompts for this account will be removed.", color = L.muted, fontSize = 13.sp) },
         confirmButton = { TextButton(onConfirm) { Text("Delete", color = L.red) } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } }
     )
@@ -292,7 +292,7 @@ fun AccountDialog(account: Account?, onDismiss: () -> Unit, onSave: (Account) ->
                         )
                     }
                 }
-                if (account != null) Text("Deleting archives the account and moves its transactions to the Recycle Bin.", color = L.muted, fontSize = 12.sp)
+                if (account != null) Text("Deleting archives the account, moves its ordinary transactions to the Recycle Bin, and keeps settlement history.", color = L.muted, fontSize = 12.sp)
             }
         },
         confirmButton = {

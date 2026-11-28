@@ -27,6 +27,16 @@ class PeopleMathTest {
     }
 
     @Test
+    fun accountArchivalKeepsSettlementRows() {
+        val ordinary = Txn(type = "EXPENSE", amount = 100.0, date = 0L, accountId = 1)
+        val out = Txn(type = "PERSON_OUT", amount = 50.0, date = 0L, accountId = 1)
+        val inside = Txn(type = "PERSON_IN", amount = 50.0, date = 0L, accountId = 1)
+        val adj = Txn(type = "PERSON_ADJ", amount = 50.0, date = 0L, accountId = 0)
+        assertTrue(!PeopleMath.isSettlement(ordinary))
+        assertTrue(PeopleMath.isSettlement(out) && PeopleMath.isSettlement(inside) && PeopleMath.isSettlement(adj))
+    }
+
+    @Test
     fun detachedSplitStillCountsOnlyYourShare() {
         val t = Txn(type = "EXPENSE", amount = 100.0, date = 0L, accountId = 1, personId = 0, owed = 60.0)
         assertEquals(40.0, t.myAmount)

@@ -57,7 +57,8 @@ interface LedgerDao {
     @Query("DELETE FROM accounts WHERE id = :id")
     suspend fun deleteAccount(id: Long)
 
-    @Query("DELETE FROM transactions WHERE accountId = :id OR toAccountId = :id")
+    /** Settlement rows are audit history for already-settled group/trip debts, so archiving keeps them. */
+    @Query("DELETE FROM transactions WHERE (accountId = :id OR toAccountId = :id) AND type NOT IN ('PERSON_IN', 'PERSON_OUT', 'PERSON_ADJ')")
     suspend fun deleteTxnsOfAccount(id: Long)
 
     @Query("SELECT * FROM budgets")

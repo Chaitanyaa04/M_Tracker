@@ -136,7 +136,7 @@ class Repository(private val db: AppDatabase) {
     }
 
     suspend fun deleteAccount(id: Long) = db.withTransaction {
-        d.allTxns().filter { it.accountId == id || it.toAccountId == id }.forEach { t ->
+        d.allTxns().filter { (it.accountId == id || it.toAccountId == id) && !PeopleMath.isSettlement(it) }.forEach { t ->
             d.insertDeletedTxn(t.asDeleted())
             record("TXN", t.id, "DELETE", t.asJson().toString())
             adjustTripSpent(t, -t.amount)
