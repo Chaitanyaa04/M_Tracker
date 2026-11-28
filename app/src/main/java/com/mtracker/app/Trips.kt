@@ -102,8 +102,8 @@ fun TripsView(vm: MainViewModel, modifier: Modifier = Modifier) {
                 }
             }
             if (active.isEmpty()) item {
-                Text("Trips keep everyone’s expenses and who owes whom in one place, even when nobody in the group uses this phone.",
-                    color = L.muted, fontSize = 14.sp, lineHeight = 20.sp, modifier = Modifier.padding(8.dp, 4.dp))
+                CapInfo("Trips", "Everyone’s expenses and who owes whom in one place, even if they don’t use this phone.",
+                    Modifier.padding(8.dp, 4.dp), color = L.text)
             }
             items(active, key = { it.id }) { t ->
                 val (line, tone) = yourLine(t.id)
@@ -394,7 +394,7 @@ private fun TripDialog(
                     Hairline()
                 }
                 Field("Budget (optional, INR)", budget, { budget = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, kb = KeyboardType.Decimal)
-                Cap("Who is coming? You is always included.")
+                CapInfo("Who", "You are always included.", color = L.text)
                 if (people.isEmpty()) Text("Add people in the Splits tab first.", color = L.muted, fontSize = 13.sp)
                 else {
                     val rows = people.chunked(4)
@@ -488,7 +488,7 @@ private fun TripExpenseDialog(
                         if (id !in shares) shares = (shares + id).toSet()
                     }
                 )
-                Cap("Who shares it?")
+                CapInfo("Who shares", "Everyone’s share becomes a debt to the payer. Only debts involving you appear on person pages.", color = L.text)
                 if (memberIds.isEmpty()) Text("Add people to the trip first.", color = L.muted, fontSize = 13.sp)
                 else {
                     val ids = listOf(0L) + memberIds.filter { it != 0L }
@@ -514,7 +514,7 @@ private fun TripExpenseDialog(
                     Chip("Custom", mode == "CUSTOM") { mode = "CUSTOM" }
                 }
                 if (mode == "CUSTOM") {
-                    Text("Enter parts, not percentages. Zero means they owe nothing.", color = L.muted, fontSize = 11.sp)
+                    CapInfo("Custom parts", "Enter parts, not percentages. Zero means they owe nothing.", color = L.text)
                     participants.forEach { id ->
                         Field(tripWho(people, id), weights[id] ?: "1",
                             { weights = weights + (id to it.filter { c -> c.isDigit() || c == '.' }.take(6)) },
@@ -527,8 +527,6 @@ private fun TripExpenseDialog(
                     Text(dayLabel(date), color = L.text, fontSize = 16.sp, modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
                     Hairline()
                 }
-                Text("Everyone’s share becomes a debt to the payer. Only debts involving you appear on person pages.",
-                    color = L.muted, fontSize = 11.sp, lineHeight = 16.sp)
             }
         },
         confirmButton = {

@@ -50,9 +50,13 @@ Afterwards, the app checks GitHub daily and on resume. It shows one notification
 
 System, Paper (light), OLED (pure black) and Soft Dark (charcoal) are available in Settings. All four chips stay reachable on narrow screens; System dark uses Soft Dark, and OLED Black is pure black. The daily safe-to-spend card is off by default and can be enabled under Settings → Appearance.
 
+## Home
+
+Home shows **Today’s balance** or **Month balance** with a corner toggle. Positive balances stay unmarked; negatives are red and can use `−₹…` or `(₹…)` from Settings → Appearance. In Month view, tap a day to open that day’s entries.
+
 ## Quick entry
 
-The centre **+** opens a small head tray first — likely and most-used heads come before the full list. Pick one and the entry sheet opens with that head already selected and the amount field focused. The chosen head keeps its normal place in the quick strip instead of jumping to the top. People, occasion groups, split modes, travel route and date sit under **More details**; a group only narrows the people tiles and never changes the head. New heads can still be created from the entry sheet. Transfers skip the head step.
+The centre **+** opens a small head tray first — **Most used**, then **All heads**, then a **+** tile after **Other**. Pick one and the entry sheet opens with that head already selected and the amount field focused. The chosen head keeps its normal place in the quick strip instead of jumping to the top. Fresh installs get fewer, broader default heads; old heads and transaction history stay available. People, occasion groups, split modes, travel route and date sit under **More**; a group only narrows the people tiles and never changes the head. New heads can still be created from the tray or entry sheet. Transfers skip the head step.
 
 ## Payment prompts
 

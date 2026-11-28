@@ -516,11 +516,11 @@ class Repository(private val db: AppDatabase) {
         if (payer == 0L) {
             val mine = cents[0L] ?: 0L
             if (mine > 0L) d.insert(Txn(type = "EXPENSE", amount = mine / 100.0, note = note, date = date,
-                category = "Travel", accountId = accountId, tag = "trip", tripId = tripId, createdAt = now))
+                category = "Trips & travel", accountId = accountId, tag = "trip", tripId = tripId, createdAt = now))
             sharesOf.filter { it != 0L }.forEach { p ->
                 val share = cents[p] ?: 0L
                 if (share > 0L) d.insert(Txn(type = "EXPENSE", amount = share / 100.0, note = note, date = date,
-                    category = "Travel", accountId = accountId, personId = p, owed = share / 100.0,
+                    category = "Trips & travel", accountId = accountId, personId = p, owed = share / 100.0,
                     tripId = tripId, createdAt = now))
             }
         } else {

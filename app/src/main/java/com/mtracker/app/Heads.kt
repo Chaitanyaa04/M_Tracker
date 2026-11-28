@@ -262,8 +262,7 @@ fun MerchantsSheet(names: List<String>, selected: String, onPick: (String) -> Un
 @Composable
 fun HeadsSheet(
     heads: List<Category>, initialKind: String, selected: String?, usage: Map<String, Int>,
-    likely: (String) -> List<String>, showKindSwitch: Boolean,
-    label: String = "Choose a head", hint: String? = null,
+    showKindSwitch: Boolean, label: String = "Choose a head", hint: String? = null,
     onPick: (String, String) -> Unit, onCreate: ((String, String, String) -> Unit)? = null, onDismiss: () -> Unit
 ) {
     var kind by remember { mutableStateOf(initialKind) }
@@ -273,8 +272,10 @@ fun HeadsSheet(
     val list = heads.filter { it.kind == kind }
     val names = list.map { it.name }
     val shown = list.filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }.map { it.name }
-    val likelyNow = remember(kind, heads) { likely(kind).filter { it in names } }
-    val popular = names.filter { (usage["$kind|$it"] ?: 0) > 0 }.sortedByDescending { usage["$kind|$it"] ?: 0 }.take(8)
+    // "Other" stays last, so the + tile is always the final choice.
+    val ordered = shown.sortedWith(compareBy<String> { it.equals("Other", ignoreCase = true) }.thenBy { shown.indexOf(it) })
+    val popular = names.filter { !it.equals("Other", true) && (usage["$kind|$it"] ?: 0) > 0 }
+        .sortedByDescending { usage["$kind|$it"] ?: 0 }.take(4)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -287,14 +288,17 @@ fun HeadsSheet(
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                if (hint != null) Text(label, color = L.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                else Cap(label, color = L.text)
+                if (hint != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(label, color = L.text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        InfoTip(hint)
+                    }
+                } else Cap(label, color = L.text)
                 if (showKindSwitch) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Expense", kind == "EXPENSE") { kind = "EXPENSE" }
                     Chip("Income", kind == "INCOME") { kind = "INCOME" }
                 }
             }
-            if (hint != null) Text(hint, color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             Field("Search heads", q, { q = it })
         }
         LazyVerticalGrid(
@@ -302,16 +306,12 @@ fun HeadsSheet(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (q.isBlank() && likelyNow.isNotEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }, key = "hl") { Cap("Likely right now", Modifier.padding(8.dp, 8.dp, 8.dp, 2.dp)) }
-                items(likelyNow, key = { "l$it" }) { n -> HeadChoice(n, n == selected) { onPick(n, kind) } }
-            }
             if (q.isBlank() && popular.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }, key = "hp") { Cap("Most used", Modifier.padding(8.dp, 12.dp, 8.dp, 2.dp)) }
                 items(popular, key = { "p$it" }) { n -> HeadChoice(n, n == selected) { onPick(n, kind) } }
             }
             item(span = { GridItemSpan(maxLineSpan) }, key = "ha") { Cap("All heads", Modifier.padding(8.dp, 12.dp, 8.dp, 2.dp)) }
-            items(shown, key = { "a$it" }) { n -> HeadChoice(n, n == selected) { onPick(n, kind) } }
+            items(ordered, key = { "a$it" }) { n -> HeadChoice(n, n == selected) { onPick(n, kind) } }
             if (onCreate != null) item(key = "new") {
                 Column(
                     Modifier.clip(RoundedCornerShape(14.dp)).clickable { creating = true }.padding(vertical = 6.dp),
@@ -322,7 +322,7 @@ fun HeadsSheet(
                         contentAlignment = Alignment.Center
                     ) { Text("+", color = L.text, fontSize = 26.sp) }
                     Spacer(Modifier.height(4.dp))
-                    Text("New head", color = L.muted, fontSize = 11.sp)
+                    Text("New", color = L.muted, fontSize = 11.sp)
                 }
             }
         }

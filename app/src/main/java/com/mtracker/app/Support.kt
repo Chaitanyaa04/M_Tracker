@@ -109,6 +109,7 @@ class AppPrefs private constructor(c: Context) {
     val notifiedTag = MutableStateFlow(sp.getString("notifiedtag", "") ?: "")
     val defaultHeadsSeededV6 = MutableStateFlow(sp.getBoolean("headsseedv6", false))
     val showDailyCard = MutableStateFlow(sp.getBoolean("dailycard", false))   // off by default
+    val parenNegatives = MutableStateFlow(sp.getBoolean("negparen", false))   // (₹…) instead of −₹…
 
     /** Per-install random secret used to verify internal notification PendingIntents arriving at exported MainActivity. */
     @Volatile private var intentTokenCache: String? = null
@@ -213,6 +214,7 @@ class AppPrefs private constructor(c: Context) {
     fun setNotifiedTag(v: String) { notifiedTag.value = v; sp.edit().putString("notifiedtag", v).apply() }
     fun setDefaultHeadsSeededV6(v: Boolean) { defaultHeadsSeededV6.value = v; sp.edit().putBoolean("headsseedv6", v).apply() }
     fun setShowDailyCard(v: Boolean) { showDailyCard.value = v; sp.edit().putBoolean("dailycard", v).apply() }
+    fun setParenNegatives(v: Boolean) { parenNegatives.value = v; sp.edit().putBoolean("negparen", v).apply() }
     /** Every "Wrong call" makes that app need a longer visit before we ask again. */
     fun wrongCount(pkg: String): Int = (sp.getString("wrong", "") ?: "").split(";").firstOrNull { it.startsWith("$pkg=") }?.substringAfter("=")?.toIntOrNull() ?: 0
     fun bumpWrong(pkg: String) {

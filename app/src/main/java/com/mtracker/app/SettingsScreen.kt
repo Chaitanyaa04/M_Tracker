@@ -176,21 +176,25 @@ private fun AppearancePage(vm: MainViewModel, onBack: () -> Unit) {
     val hide by p.hideBalances.collectAsState()
     val haptics by p.haptics.collectAsState()
     val showDaily by p.showDailyCard.collectAsState()
+    val parens by p.parenNegatives.collectAsState()
     SubPage("Appearance", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Theme")
+                CapInfo("Theme", "System dark uses Soft Dark. OLED is pure black.", color = L.text)
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("OLED Black", theme == "OLED") { p.setTheme("OLED") }
                     Chip("Soft Dark", theme == "SOFT_DARK") { p.setTheme("SOFT_DARK") }
                     Chip("Editorial White", theme == "PAPER") { p.setTheme("PAPER") }
                     Chip("System", theme == "SYSTEM") { p.setTheme("SYSTEM") }
                 }
-                Text("System dark uses Soft Dark. Choose OLED Black for pure-black screens.", color = L.muted, fontSize = 12.sp)
-                Spacer(Modifier.height(8.dp))
-                SwitchRow("Hide balances (shows ••••)", hide) { p.setHide(it) }
-                SwitchRow("Show daily safe-to-spend card", showDaily) { p.setShowDailyCard(it) }
-                SwitchRow("Haptic feedback on keypad", haptics) { p.setHaptics(it) }
+                Spacer(Modifier.height(4.dp))
+                SwitchRow("Hide balances (••••)", hide) { p.setHide(it) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SwitchRow("Negative as (₹…)", parens, { p.setParenNegatives(it) }, Modifier.weight(1f))
+                    InfoTip("Off shows −₹…; positive amounts stay unmarked.")
+                }
+                SwitchRow("Daily safe-to-spend", showDaily) { p.setShowDailyCard(it) }
+                SwitchRow("Haptic feedback", haptics) { p.setHaptics(it) }
             }
         }
     }
@@ -219,8 +223,7 @@ private fun SecurityPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: 
                 }
                 SwitchRow("Hide in recents & block screenshots", secure) { p.setSecure(it) }
                 Spacer(Modifier.height(8.dp))
-                Cap("Privacy promise")
-                Text("Your transactions, accounts and people never leave this phone. There are no analytics, ads, accounts or servers. The internet is used for one thing only: checking and downloading app updates from your GitHub releases (you can switch that off under App updates).", color = L.muted, fontSize = 13.sp, lineHeight = 20.sp)
+                CapInfo("Privacy promise", "Your transactions, accounts and people never leave this phone. No analytics, ads, accounts or servers. Internet is used only for app updates, which you can switch off.", color = L.text)
             }
         }
     }
@@ -249,34 +252,28 @@ private fun RemindersPage(vm: MainViewModel, onBack: () -> Unit, onHelp: () -> U
     SubPage("Payment reminders", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Cap("How it works")
-                Text(
-                    "Arthak notices when one of your payment apps is opened and asks expense, income or wrong call. It never reads notification text, SMS, screens or amounts — you enter those yourself.",
-                    color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
-                )
+                CapInfo("How it works", "Arthak sees only which payment app you opened, then asks expense, income or wrong call. No notification text, SMS, screens or amounts. You type those yourself.", color = L.text)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Quietly", !live) { p.setLive(false); MonitorController.sync(ctx) }
                     Chip("Instantly", live) { p.setLive(true); MonitorController.sync(ctx) }
+                    InfoTip(if (!live) "Checks about every 15 minutes. Short glances are ignored; nothing sits in your notification shade."
+                            else "Asks after a short delay. Android needs a small status notification while this is on.")
                 }
-                Text(
-                    if (!live) "Checks every ~15 minutes and sends one tidy summary. Nothing sits in your notification shade. Short glances are ignored."
-                    else "Asks after a short delay. Android requires a small status notification while this is on.",
-                    color = L.muted, fontSize = 12.sp, lineHeight = 18.sp
-                )
                 if (live) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120).forEach { (l, s) -> Chip(l, delay == s) { p.setDelay(s) } }
                 }
                 if (usageOk) Cap("Usage access granted", color = L.green)
                 else {
-                    MonoButton("Allow usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
-                    Text("Greyed out? That’s Android’s sideload lock.", color = L.muted, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MonoButton("Allow usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) })
+                        InfoTip("Greyed out? Android restricts sideloaded apps. Use “Show me how to fix it”.")
+                    }
                     MonoButton("Show me how to fix it", onHelp, filled = false)
                 }
-                Cap("Quiet period after a prompt")
+                CapInfo("Quiet period", "After one prompt, that app stays quiet for this long. Wrong calls make it less eager.", color = L.text)
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("10s" to 10, "30s" to 30, "1m" to 60, "2m" to 120, "5m" to 300, "10m" to 600).forEach { (l, s2) -> Chip(l, cd == s2) { p.setCooldown(s2) } }
                 }
-                Text("After one prompt for an app, it stays quiet for this long even if it triggers again. Every “wrong call” also makes that app a bit less eager.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
         item { Cap("Apps I pay with", Modifier.padding(24.dp, 4.dp, 24.dp, 8.dp)) }
@@ -356,8 +353,7 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
     SubPage("Daily habits", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Evening check-in")
-                Text("One nudge if you haven’t logged anything, or a payment prompt is still waiting. Includes a one-tap “No spending today”.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                CapInfo("Evening check-in", "One nudge if nothing is logged, or a prompt is waiting. Includes one-tap “No spending today”.", color = L.text)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("Off" to -1, "8 PM" to 20, "9 PM" to 21, "10 PM" to 22).forEach { (l, h) ->
                         Chip(l, hour == h) { p.setCheckin(h); CheckinScheduler.sync(ctx) }
@@ -365,8 +361,7 @@ private fun HabitsPage(vm: MainViewModel, onBack: () -> Unit) {
                 }
                 Spacer(Modifier.height(8.dp))
                 Spacer(Modifier.height(8.dp))
-                Cap("Shortcuts")
-                Text("Long-press the Arthak icon on your home screen for “Add expense” and “Add income”. Drag one out to keep it on your home screen. Nothing sits in your notification shade.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                CapInfo("Shortcuts", "Long-press the Arthak icon for Add expense / income. Drag one to your home screen. Nothing sits in the notification shade.", color = L.text)
             }
         }
     }
@@ -588,8 +583,7 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
     SubPage("Backup, export & import", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Encrypted backup (everything)")
-                Text("Backups are encrypted with AES-256-GCM using your passphrase before being written to your chosen folder, so they stay private even if synced with Drive or Syncthing.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                CapInfo("Encrypted backup", "AES-256-GCM with your passphrase before writing to your folder, so synced copies stay private.", color = L.text)
                 Text(if (folder.isBlank()) "Folder: not set" else "Folder: set · last backup $lastText", color = L.text, fontSize = 13.sp)
                 Text(if (hasPass) "Encryption passphrase: set" else "Encryption passphrase: not set (required)", color = if (hasPass) L.green else L.red, fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -612,12 +606,11 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
             }
             Hairline()
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cap("Spreadsheet (CSV)")
+                CapInfo("Spreadsheet (CSV)", "Files go through Android’s picker. No storage permission, no network.", color = L.text)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MonoButton("Export CSV", { onConfirm("Export transactions to CSV") { export.launch("arthak-${LocalDate.now()}.csv") } })
                     MonoButton("Import CSV", { importer.launch(arrayOf("text/*", "application/vnd.ms-excel", "application/octet-stream")) }, filled = false)
                 }
-                Text("Files go through Android’s file picker. No storage permission, no network.", color = L.muted, fontSize = 12.sp)
             }
         }
     }
@@ -627,10 +620,14 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
         var err by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showPassDialog = false }, containerColor = L.surface,
-            title = { Cap("Backup encryption passphrase", color = L.text) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Cap("Backup passphrase", color = L.text)
+                    InfoTip("At least 8 characters. Keep it safe — you need it to restore on another phone.")
+                }
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Use at least 8 characters. Keep this passphrase somewhere safe — you will need it to restore backups on another phone.", color = L.muted, fontSize = 13.sp)
                     Field("Passphrase", pass1, { pass1 = it; err = "" }, secret = true)
                     Field("Confirm passphrase", pass2, { pass2 = it; err = "" }, secret = true)
                     if (err.isNotEmpty()) Text(err, color = L.red, fontSize = 12.sp)
@@ -665,13 +662,16 @@ private fun DataPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (Str
         } ?: if (previewError.isNotBlank()) "Backup check failed: $previewError" else "Checking backup…"
         AlertDialog(
             onDismissRequest = { restoreUri = null }, containerColor = L.surface,
-            title = { Cap("Restore backup?", color = L.text) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Cap("Restore backup?", color = L.text)
+                    InfoTip("This replaces current data. The file is checked first and a private recovery copy is saved on this phone; if that copy fails, restore is cancelled.")
+                }
+            },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("This replaces everything currently in Arthak with the file you chose. The file is checked first, and a recovery copy of today's data is saved on this phone before anything is changed.", color = L.muted, fontSize = 14.sp)
                     Text(previewText, color = if (preview != null) L.text else L.red, fontSize = 12.sp)
                     if (restoreEncrypted) Field("Backup passphrase", restorePass, { restorePass = it }, secret = true)
-                    Text("A private safety copy is always saved on this phone first. If a backup folder and passphrase are set, an encrypted copy is saved there too. If a required copy fails, restore is cancelled.", color = L.muted, fontSize = 12.sp)
                     Field("Type RESTORE to confirm", confirmText, { confirmText = it })
                 }
             },
@@ -692,8 +692,7 @@ private fun RecycleBinPage(vm: MainViewModel, onMsg: (String) -> Unit, onBack: (
     SubPage("Recycle bin", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Cap("Deleted transactions", color = L.text)
-                Text("Transactions deleted by swiping or by removing an account stay here until you restore or delete them forever. The bin is kept only on this phone.", color = L.muted, fontSize = 13.sp)
+                CapInfo("Deleted transactions", "Swiped or account-removed entries stay here until restored or deleted forever. The bin stays on this phone.", color = L.text)
             }
             Hairline()
         }
@@ -722,8 +721,7 @@ private fun ChangeHistoryPage(vm: MainViewModel, onBack: () -> Unit) {
     SubPage("Change history", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Cap("Recent local changes", color = L.text)
-                Text("Edits, deletions and restores are noted here with the earlier value. This log stays only on this phone.", color = L.muted, fontSize = 13.sp)
+                CapInfo("Recent local changes", "Edits, deletions and restores with their earlier values. The log stays on this phone.", color = L.text)
             }
             Hairline()
         }
@@ -763,24 +761,22 @@ private fun HelpPage(onBack: () -> Unit) {
     SubPage("Install & permission help", onBack) {
         item {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Cap("Usage access is greyed out / “restricted”", color = L.text)
-                Text("Android blocks sensitive permissions for apps installed outside the Play Store. It’s a one-time unlock:", color = L.muted, fontSize = 13.sp, lineHeight = 19.sp)
+                CapInfo("Restricted usage access", "Android blocks sensitive permissions for sideloaded apps. Unlock once, then allow access.", color = L.text)
                 Step(1, "Tap “Open App info” below.")
                 Step(2, "Tap the ⋮ menu at the top-right.")
                 Step(3, "Choose “Allow restricted settings” and confirm with your PIN or fingerprint.")
                 Step(4, "Come back and tap “Open usage access”, then switch Arthak on.")
-                Text("If ⋮ doesn’t show the option, tap the usage-access toggle once (it shows the block message), then check App info again.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                InfoTip("If ⋮ has no option, tap the usage-access toggle once to reveal the block message, then revisit App info.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     MonoButton("Open App info", { openAppInfo(ctx) })
                     MonoButton("Open usage access", { ctx.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, filled = false)
                 }
                 Spacer(Modifier.height(16.dp))
-                Cap("Play Protect warning", color = L.text)
-                Text("Play Protect is cautious about new apps from outside the Play Store, especially ones that read notifications. This standard build contains no notification-reading code. Its only internet use is checking and downloading app updates from your GitHub repository (which you can turn off under App updates).", color = L.muted, fontSize = 13.sp, lineHeight = 19.sp)
+                CapInfo("Play Protect", "This build has no notification-reading code. Its only internet use is signed updates from your GitHub repo, which you can switch off.", color = L.text)
                 Step(1, "Install from your file manager (or adb), not directly from a browser or chat app.")
                 Step(2, "If asked, tap “Scan app” / “Send for security check”. Once Google has seen the app, the prompt stops.")
                 Step(3, "Keep installing updates signed with the same key, so the app stays recognised.")
-                Text("Don’t turn Play Protect off permanently. Review each prompt and only proceed for an app you built yourself.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
+                InfoTip("Don’t turn Play Protect off permanently. Review each prompt and only proceed for an app you built yourself.")
             }
         }
     }
@@ -793,9 +789,10 @@ private fun AboutPage(onBack: () -> Unit) {
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("₹", fontSize = 56.sp, color = L.text, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
                 Text("Arthak", color = L.text, fontSize = 22.sp)
-                Num("Version ${BuildConfig.VERSION_NAME}" + if (BuildConfig.AUTOFILL) " · auto-fill build" else "", size = 13.sp, color = L.muted)
-                Spacer(Modifier.height(8.dp))
-                Text("A private expense tracker. Your data lives only in a local database on this device. No analytics, no ads, no account. The internet is used only to fetch app updates.", color = L.muted, fontSize = 14.sp, lineHeight = 21.sp)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Num("Version ${BuildConfig.VERSION_NAME}" + if (BuildConfig.AUTOFILL) " · auto-fill build" else "", size = 13.sp, color = L.muted)
+                    InfoTip("A private expense tracker. Data lives only in a local database. No analytics, ads or account. Internet is used only for app updates.")
+                }
             }
         }
     }
@@ -838,7 +835,10 @@ private fun UpdatesPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (
                 }
                 MonoButton("Check now", { Updater.check(ctx, manual = true) }, filled = false)
                 SwitchRow("Check for updates daily and tell me", auto) { p.setUpdateCheck(it); UpdateScheduler.sync(ctx) }
-                Field("GitHub repository (owner/name)", repo, { repo = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Field("GitHub repository (owner/name)", repo, { repo = it }, Modifier.weight(1f))
+                    InfoTip("Updates come from this repo’s Releases and must match Arthak’s package name and signing key. Android confirms each install.")
+                }
                 if (repo.trim() != repoSaved.ifBlank { BuildConfig.GITHUB_REPO }.trim()) {
                     MonoButton("Save repository", {
                         val candidate = repo.trim()
@@ -852,7 +852,6 @@ private fun UpdatesPage(vm: MainViewModel, onMsg: (String) -> Unit, onConfirm: (
                         }
                     }, filled = false)
                 }
-                Text("New versions come from the Releases page of that repository and must match Arthak's package name and signing key. Android asks you to confirm each install once.", color = L.muted, fontSize = 12.sp, lineHeight = 18.sp)
             }
         }
     }

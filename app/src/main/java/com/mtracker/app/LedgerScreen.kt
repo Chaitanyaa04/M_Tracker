@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material3.*
+import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -52,11 +53,15 @@ fun LedgerScreen(
     val people by vm.peopleNames.collectAsState()
     val trips by vm.trips.collectAsState()
     val showDaily by vm.prefs.showDailyCard.collectAsState()
+    val paren by vm.prefs.parenNegatives.collectAsState()
     val names = remember(accs) { accs.associate { it.id to it.name } }
     val tripNames = remember(trips) { trips.associate { it.id to it.name } }
     var offset by rememberSaveable { mutableIntStateOf(0) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var period by rememberSaveable { mutableStateOf("TODAY") }
+    var selectedDay by rememberSaveable { mutableLongStateOf(0L) }
+    LaunchedEffect(period, offset) { selectedDay = 0L }
 
     val sel = LocalDate.now().withDayOfMonth(1).plusMonths(offset.toLong())
     val lo = dayMillis(sel)
@@ -64,14 +69,26 @@ fun LedgerScreen(
     val inMonth = txns.filter { it.date in lo until hi }
     val out = inMonth.filter { it.type == "EXPENSE" }.sumOf { it.myAmount }
     val inc = inMonth.filter { it.type == "INCOME" }.sumOf { it.amount }
+    val todayStart = today()
+    val dayTxns = txns.filter { it.date == todayStart }
+    val dayOut = dayTxns.filter { it.type == "EXPENSE" }.sumOf { it.myAmount }
+    val dayInc = dayTxns.filter { it.type == "INCOME" }.sumOf { it.amount }
     val q = query.trim()
     val isSearch = searching && q.isNotEmpty()
-    val shown = if (isSearch) txns.filter { t ->
-        t.merchant.contains(q, true) || t.note.contains(q, true) || t.category.contains(q, true) ||
-            t.tag.contains(q, true) || (names[t.accountId] ?: "").contains(q, true) ||
-            (tripNames[t.tripId] ?: "").contains(q, true) || fmtAmt(t.amount).contains(q)
-    } else inMonth
-    val groups = remember(shown) { shown.groupBy { it.date }.entries.toList() }
+    fun netOf(list: List<Txn>) =
+        list.filter { it.type == "INCOME" }.sumOf { it.amount } - list.filter { it.type == "EXPENSE" }.sumOf { it.myAmount }
+    val dayGroups = remember(inMonth) { inMonth.groupBy { it.date }.entries.toList().sortedByDescending { it.key } }
+    val shown = when {
+        isSearch -> txns.filter { t ->
+            t.merchant.contains(q, true) || t.note.contains(q, true) || t.category.contains(q, true) ||
+                t.tag.contains(q, true) || (names[t.accountId] ?: "").contains(q, true) ||
+                (tripNames[t.tripId] ?: "").contains(q, true) || fmtAmt(t.amount).contains(q)
+        }
+        period == "TODAY" -> dayTxns
+        selectedDay != 0L -> inMonth.filter { it.date == selectedDay }
+        else -> emptyList()
+    }
+    val groups = remember(shown) { shown.groupBy { it.date }.entries.toList().sortedByDescending { it.key } }
     val monthName = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH).format(sel)
 
     // Safe-to-spend: what's left of the overall monthly cap, spread over the days that remain.
@@ -86,66 +103,77 @@ fun LedgerScreen(
 
     LazyColumn(modifier.fillMaxSize()) {
         item {
-            Column(Modifier.padding(24.dp, 12.dp, 24.dp, 22.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Cap("‹", Modifier.clickable { offset-- }.padding(end = 12.dp, top = 8.dp, bottom = 8.dp), color = L.text)
+            Column(Modifier.padding(24.dp, 12.dp, 24.dp, 18.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (period == "MONTH") Row(verticalAlignment = Alignment.CenterVertically) {
+                        Cap("‹", Modifier.clickable { offset-- }.padding(end = 10.dp, top = 8.dp, bottom = 8.dp), color = L.text)
                         Cap(monthName, color = L.muted)
-                        if (offset < 0) Cap("›", Modifier.clickable { offset++ }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp), color = L.text)
+                        if (offset < 0) Cap("›", Modifier.clickable { offset++ }.padding(start = 10.dp, top = 8.dp, bottom = 8.dp), color = L.text)
+                    } else Cap("Today", color = L.text)
+                    Spacer(Modifier.weight(1f))
+                    val seg = RoundedCornerShape(11.dp)
+                    Row(Modifier.clip(seg).background(L.bg).border(1.dp, L.border, seg)) {
+                        listOf("TODAY" to "Today", "MONTH" to "Month").forEach { (k, label) ->
+                            val on = period == k
+                            Box(Modifier.clip(seg).background(if (on) L.accent else Color.Transparent)
+                                .clickable { period = k }.padding(horizontal = 10.dp, vertical = 5.dp)) {
+                                Text(label, color = if (on) L.onAccent else L.muted, fontSize = 11.sp, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal)
+                            }
+                        }
                     }
-                    Cap(if (searching) "Close" else "Search", Modifier.clickable { searching = !searching; if (!searching) query = "" }.padding(8.dp), color = L.text)
+                    Spacer(Modifier.width(10.dp))
+                    Cap(if (searching) "Close" else "Search",
+                        Modifier.clickable { searching = !searching; if (!searching) query = "" }.padding(vertical = 8.dp), color = L.text)
                 }
                 Spacer(Modifier.height(10.dp))
-                if (offset == 0 && showDaily && safeToday != null && !searching) {
-                    val remaining = safeToday - spentToday
-                    HeroCard(remaining, safeToday, spentToday, daysLeft, overall?.let { maxOf(0.0, it - spentBefore - spentToday) })
-                    Spacer(Modifier.height(12.dp))
-                    Num("Net spend ${inrS(out - inc)}  ·  Out ${inr(out)}  ·  In ${inr(inc)}", size = 12.sp, color = L.muted)
-                } else {
-                    Cap("Net spend")
-                    Spacer(Modifier.height(6.dp))
-                    Num(inrS(out - inc), size = 52.sp, weight = FontWeight.Light)
-                    Spacer(Modifier.height(4.dp))
-                    Num("Out ${inr(out)}  ·  In ${inr(inc)}", size = 13.sp, color = L.muted)
-                    if (offset == 0 && !searching && overall == null && dailyCap == null)
-                        Text("Set a daily or monthly limit in Plan to see what’s safe to spend today.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-                    if (offset == 0 && !searching && !showDaily && (overall != null || dailyCap != null))
-                        Text("Daily card hidden. Turn it on in Settings → Appearance.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+                val net = if (period == "MONTH") inc - out else dayInc - dayOut
+                NetHero(if (period == "MONTH") "Month balance" else "Today’s balance", net,
+                    if (period == "MONTH") out else dayOut, if (period == "MONTH") inc else dayInc, paren)
+                if (period == "TODAY" && showDaily && safeToday != null && !searching) {
+                    Spacer(Modifier.height(10.dp))
+                    SafeStrip(safeToday - spentToday, safeToday, spentToday, daysLeft)
                 }
-                if (offset == 0) {
-                    Spacer(Modifier.height(16.dp))
+                if (period == "TODAY" && offset == 0 && !searching) {
+                    Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StatusPill(status, onStatus)
-                        Cap("Streak · ${streak.first} day" + if (streak.first == 1) "" else "s", color = L.muted)
-                    }
-                    if (!streak.second) {
-                        Spacer(Modifier.height(12.dp))
-                        MonoButton("No spending today", { vm.markNoSpend() }, filled = false)
+                        Cap("Streak · ${streak.first}d", color = L.muted)
+                        if (!streak.second) Cap("No spend today ✓", Modifier.clickable { vm.markNoSpend() }, color = L.green)
                     }
                 }
                 if (searching) {
-                    Spacer(Modifier.height(16.dp))
-                    Field("Search merchant, note, tag, amount", query, { query = it })
+                    Spacer(Modifier.height(12.dp))
+                    Field("Search", query, { query = it })
                 }
             }
             Hairline()
         }
-        if (offset == 0 && !isSearch && pending.isNotEmpty()) {
-            item(key = "ph") { Cap("Unlogged payments · ${pending.size}", Modifier.padding(24.dp, 20.dp, 24.dp, 4.dp), color = L.red) }
+        if (period == "TODAY" && offset == 0 && !isSearch && pending.isNotEmpty()) {
+            item(key = "ph") { Cap("Unlogged payments · ${pending.size}", Modifier.padding(24.dp, 16.dp, 24.dp, 4.dp), color = L.red) }
             items(pending, key = { "p${it.id}" }) { p -> PendingRow(p, onPending) }
         }
-        if (shown.isEmpty()) item {
+        if (period == "MONTH" && !isSearch) {
+            item(key = "dh") { Cap("Days", Modifier.padding(24.dp, 16.dp, 24.dp, 4.dp)) }
+            items(dayGroups, key = { "d${it.key}" }) { (date, list) ->
+                DaySummaryRow(dayLabel(date), netOf(list), list.size, selectedDay == date, paren) {
+                    selectedDay = if (selectedDay == date) 0L else date
+                }
+            }
+            if (selectedDay == 0L) item(key = "dtip") {
+                Text("Tap a day for its entries.", color = L.muted, fontSize = 12.sp, modifier = Modifier.padding(24.dp, 8.dp))
+            }
+        }
+        if (shown.isEmpty() && !(period == "MONTH" && !isSearch && selectedDay == 0L)) item {
             Text(
-                if (isSearch) "No matches for “$q”." else if (offset == 0 && txns.isEmpty()) "No transactions yet. Tap the + button to add your first one." else "Nothing logged in $monthName.",
-                color = L.muted, fontSize = 14.sp, modifier = Modifier.padding(24.dp)
+                if (isSearch) "No matches for “$q”." else if (period == "TODAY") "Nothing logged today." else "Nothing logged that day.",
+                color = L.muted, fontSize = 13.sp, modifier = Modifier.padding(24.dp, 8.dp)
             )
         }
         groups.forEach { (date, list) ->
             item(key = "h$date") {
-                val dayNet = list.sumOf { if (it.type == "EXPENSE") -it.myAmount else if (it.type == "INCOME") it.amount else 0.0 }
-                Row(Modifier.fillMaxWidth().padding(24.dp, 20.dp, 24.dp, 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row(Modifier.fillMaxWidth().padding(24.dp, 16.dp, 24.dp, 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     Cap(dayLabel(date), color = L.muted)
-                    Num(inrS(dayNet), size = 12.sp, color = L.muted)
+                    Num(balanceText(netOf(list), paren), size = 12.sp, color = balanceColor(netOf(list)))
                 }
             }
             item(key = "g$date") {
@@ -267,36 +295,64 @@ fun TxnRow(
     }
 }
 
-/** Today's safe-to-spend as a calm ring. */
+/** Positive balances have no sign; negatives are red, with a sign or brackets by preference. */
+fun balanceText(v: Double, parens: Boolean): String = when {
+    v < -0.004 -> if (parens) "(${inr(v)})" else inrS(v)
+    else -> inr(v)
+}
+
 @Composable
-fun HeroCard(remaining: Double, safe: Double, spentToday: Double, daysLeft: Int, monthLeft: Double?) {
+fun balanceColor(v: Double) = when {
+    v < -0.004 -> L.red
+    v > 0.004 -> L.green
+    else -> L.text
+}
+
+@Composable
+fun NetHero(label: String, net: Double, out: Double, inc: Double, parens: Boolean) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(L.surface).border(1.dp, L.border, shape).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Cap(label, color = L.text)
+            InfoTip("Income minus expenses in this period. Transfers and people-only settlements don’t count.")
+        }
+        Spacer(Modifier.height(4.dp))
+        Num(balanceText(net, parens), size = 38.sp, weight = FontWeight.Light, color = balanceColor(net))
+        Spacer(Modifier.height(2.dp))
+        Num("In ${inr(inc)}  ·  Out ${inr(out)}", size = 12.sp, color = L.muted)
+    }
+}
+
+@Composable
+fun SafeStrip(remaining: Double, safe: Double, spentToday: Double, daysLeft: Int) {
     val over = remaining < 0
     val frac = if (safe > 0) min(1.0, spentToday / safe).toFloat() else if (spentToday > 0) 1f else 0f
-    val ring by androidx.compose.animation.core.animateFloatAsState(frac, androidx.compose.animation.core.tween(900), label = "ring")
-    val shown by androidx.compose.animation.core.animateFloatAsState(remaining.toFloat(), androidx.compose.animation.core.tween(700), label = "count")
-    val track = L.border; val ink = if (over) L.red else L.text
-    val shape = RoundedCornerShape(26.dp)
-    Row(
-        Modifier.fillMaxWidth().clip(shape)
-            .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(L.surface, androidx.compose.ui.graphics.lerp(L.surface, L.bg, 0.6f))))
-            .border(1.dp, L.border, shape).padding(20.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Cap("Safe today")
+            Num(inr(remaining), size = 14.sp, color = if (over) L.red else L.text)
+        }
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(L.border)) {
+            Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).height(4.dp).clip(RoundedCornerShape(2.dp))
+                .background(if (over) L.red else L.green))
+        }
+        Spacer(Modifier.height(3.dp))
+        Num("${inr(spentToday)} of ${inr(safe)} · $daysLeft days left", size = 11.sp, color = L.muted)
+    }
+}
+
+@Composable
+fun DaySummaryRow(label: String, net: Double, count: Int, expanded: Boolean, parens: Boolean, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)
+        .background(if (expanded) L.surface else Color.Transparent).padding(16.dp, 10.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Cap("Safe to spend today")
-            Spacer(Modifier.height(8.dp))
-            Num((if (shown < 0) "−" else "") + inr(shown.toDouble()), size = 36.sp, weight = FontWeight.Light, color = if (over) L.red else L.text)
-            Spacer(Modifier.height(8.dp))
-            Text("${inr(spentToday)} spent of ${inr(safe)}", color = L.muted, fontSize = 12.sp)
-            if (monthLeft != null) Text("${inr(monthLeft)} left this month · $daysLeft days", color = L.muted, fontSize = 12.sp)
+            Cap(label, color = if (expanded) L.text else L.muted)
+            Num("$count entries", size = 11.sp, color = L.muted)
         }
-        androidx.compose.foundation.Canvas(Modifier.size(84.dp)) {
-            val w = 9.dp.toPx()
-            val inset = w / 2
-            val sz = androidx.compose.ui.geometry.Size(size.width - w, size.height - w)
-            val tl = androidx.compose.ui.geometry.Offset(inset, inset)
-            drawArc(track, 0f, 360f, false, tl, sz, style = androidx.compose.ui.graphics.drawscope.Stroke(w))
-            drawArc(ink, -90f, 360f * ring, false, tl, sz, style = androidx.compose.ui.graphics.drawscope.Stroke(w, cap = androidx.compose.ui.graphics.StrokeCap.Round))
-        }
+        Num(balanceText(net, parens), size = 14.sp, color = balanceColor(net))
+        Spacer(Modifier.width(8.dp))
+        Cap(if (expanded) "⌃" else "⌄", color = L.muted)
     }
 }

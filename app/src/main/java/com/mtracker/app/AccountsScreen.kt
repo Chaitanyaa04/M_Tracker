@@ -15,9 +15,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -92,7 +96,7 @@ fun Sparkline(v: List<Double>, modifier: Modifier, color: Color) {
 }
 
 @Composable
-fun AccountCard(a: Account, balance: Double, series: List<Double>, hide: Boolean) {
+fun AccountCard(a: Account, balance: Double, series: List<Double>, hide: Boolean, parens: Boolean = false, onEdit: (() -> Unit)? = null) {
     val base = cardColor(a.color)
     val white = Color.White
     Box(
@@ -103,13 +107,18 @@ fun AccountCard(a: Account, balance: Double, series: List<Double>, hide: Boolean
         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
                 Text(a.name, color = white, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, modifier = Modifier.weight(1f))
-                Cap(typeName(a.type), color = white.copy(alpha = 0.6f))
+                Spacer(Modifier.width(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Cap(typeName(a.type), color = white.copy(alpha = 0.6f))
+                    if (onEdit != null) Icon(Icons.Rounded.Edit, "Edit account", tint = white.copy(alpha = 0.8f),
+                        modifier = Modifier.size(18.dp).clickable(onClick = onEdit))
+                }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
                 Column(Modifier.weight(1f)) {
                     Cap(if (a.type == "CARD" && balance < 0) "Owed" else "Balance", color = white.copy(alpha = 0.6f))
                     Spacer(Modifier.height(4.dp))
-                    val txt = if (hide) "••••••" else if (a.type == "CARD" && balance < 0) inr(balance) else inrS(balance)
+                    val txt = if (hide) "••••••" else if (a.type == "CARD" && balance < 0) inr(balance) else balanceText(balance, parens)
                     Num(txt, size = 30.sp, color = white, weight = FontWeight.Light)
                 }
                 Sparkline(series, Modifier.width(96.dp).height(46.dp), white.copy(alpha = 0.75f))
@@ -143,11 +152,13 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
     val bal by vm.balances.collectAsState()
     val txns by vm.txns.collectAsState()
     val hide by vm.prefs.hideBalances.collectAsState()
+    val parens by vm.prefs.parenNegatives.collectAsState()
     val accs = remember(allAccs) { allAccs.filter { !it.archived } }
     var editing by remember { mutableStateOf<Account?>(null) }
     var adding by remember { mutableStateOf(false) }
     var deleteCandidate by remember { mutableStateOf<Account?>(null) }
     var selectedId by remember { mutableLongStateOf(-1L) }
+    var menuOpen by remember { mutableStateOf(false) }
     val pager = rememberPagerState { accs.size + 1 }
     // Track the account, not its page number, so archiving one card cannot silently
     // make Edit / Recent point at a different account.
@@ -172,14 +183,24 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
         item {
             Column(Modifier.padding(24.dp, 12.dp, 24.dp, 18.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Cap("Net worth")
-                    Icon(
-                        if (hide) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "Toggle balances", tint = L.text,
-                        modifier = Modifier.size(22.dp).clickable { vm.prefs.setHide(!hide) }
-                    )
+                    CapInfo("Net worth", "Money across your active accounts. Cards owed are subtracted.", color = L.text)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(
+                            if (hide) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility, "Toggle balances", tint = L.text,
+                            modifier = Modifier.size(20.dp).clickable { vm.prefs.setHide(!hide) }
+                        )
+                        Box {
+                            Icon(Icons.Rounded.MoreHoriz, "More account actions", tint = L.text,
+                                modifier = Modifier.size(20.dp).clickable { menuOpen = true })
+                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                DropdownMenuItem(text = { Text("Transfer", color = L.text) }, onClick = { menuOpen = false; onTransfer() })
+                                DropdownMenuItem(text = { Text("+ Account", color = L.text) }, onClick = { menuOpen = false; adding = true })
+                            }
+                        }
+                    }
                 }
                 Spacer(Modifier.height(6.dp))
-                Num(m(inrS(net)), size = 46.sp, weight = FontWeight.Light, color = if (net < 0 && !hide) L.red else L.text)
+                Num(m(balanceText(net, parens)), size = 46.sp, weight = FontWeight.Light, color = if (net < 0 && !hide) L.red else L.text)
                 Spacer(Modifier.height(14.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(26.dp)) {
                     Stat("Cash & bank", m(inrS(cashBank)))
@@ -192,7 +213,7 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
             HorizontalPager(pager, contentPadding = PaddingValues(horizontal = 24.dp), pageSpacing = 12.dp) { i ->
                 if (i < accs.size) {
                     val a = accs[i]
-                    AccountCard(a, bal[a.id] ?: 0.0, remember(a, txns) { accountSeries(a, txns) }, hide)
+                    AccountCard(a, bal[a.id] ?: 0.0, remember(a, txns) { accountSeries(a, txns) }, hide, parens) { editing = a }
                 } else AddCard { adding = true }
             }
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.Center) {
@@ -200,12 +221,7 @@ fun WalletView(vm: MainViewModel, onTransfer: () -> Unit, modifier: Modifier = M
                     Box(Modifier.padding(3.dp).size(if (i == currentIndex) 7.dp else 5.dp).background(if (i == currentIndex) L.text else L.border, CircleShape))
                 }
             }
-            Row(Modifier.padding(24.dp, 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MonoButton("Transfer", onTransfer)
-                if (cur != null) MonoButton("Edit", { editing = cur }, filled = false)
-                MonoButton("+ Account", { adding = true }, filled = false)
-            }
-            Hairline()
+            Hairline(Modifier.padding(top = 8.dp))
         }
         if (cur != null) {
             val mine = txns.filter { it.accountId == cur.id || it.toAccountId == cur.id }.take(15)

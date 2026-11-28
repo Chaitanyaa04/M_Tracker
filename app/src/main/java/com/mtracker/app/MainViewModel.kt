@@ -18,7 +18,6 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.Locale
-import kotlin.math.abs
 
 const val OVERALL = "__overall__"
 /** Daily caps live in the same table, with this prefix. */
@@ -133,24 +132,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }.eager(emptyMap())
-
-    /** Heads you tend to use around this hour of day (and weekday). Powers the "Likely right now" row. */
-    fun likely(kind: String): List<String> {
-        val now = java.time.LocalDateTime.now()
-        val want = if (kind == "INCOME") "INCOME" else "EXPENSE"
-        val z = ZoneId.systemDefault()
-        val scores = HashMap<String, Double>()
-        for (t in txns.value) {
-            if (t.type != want || t.createdAt <= 0) continue
-            val at = Instant.ofEpochMilli(t.createdAt).atZone(z)
-            val diff = abs(at.hour - now.hour)
-            val dh = minOf(diff, 24 - diff)
-            if (dh > 2) continue
-            val w = if (at.dayOfWeek == now.dayOfWeek) 1.5 else 1.0
-            scores[t.category] = (scores[t.category] ?: 0.0) + w
-        }
-        return scores.entries.sortedByDescending { it.value }.take(5).map { it.key }
-    }
 
     val draft = MutableStateFlow<Draft?>(null)
     /** First step of a new entry: choose a head before the full form opens. */

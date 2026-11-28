@@ -52,21 +52,25 @@ data class Adj(val label: String = "", val amount: String = "", val sign: Int = 
 
 /** Same visual language as a head tile, used for people, groups and split modes. */
 @Composable
-private fun IconChoice(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
+private fun IconChoice(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit, badge: String? = null) {
     Column(
-        Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+        Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.padding(3.dp).size(52.dp).clip(RoundedCornerShape(17.dp))
-                .background(if (selected) L.accent else L.bg)
-                .border(1.dp, if (selected) L.accent else L.border, RoundedCornerShape(17.dp)),
+            Modifier.padding(3.dp).size(50.dp).clip(RoundedCornerShape(16.dp))
+                .background(if (selected) L.accent.copy(alpha = 0.16f) else L.bg)
+                .border(1.dp, if (selected) L.accent else L.border, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, tint = if (selected) L.onAccent else L.text, modifier = Modifier.size(24.dp))
+            Icon(icon, null, tint = if (selected) L.accent else L.text, modifier = Modifier.size(22.dp))
+            if (selected) Text("✓", color = L.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(3.dp))
+            if (badge != null && !selected) Text(badge, color = L.muted, fontSize = 10.sp,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(3.dp))
         }
-        Spacer(Modifier.height(4.dp))
-        Text(label, color = if (selected) L.text else L.muted, fontSize = 11.sp, maxLines = 2, lineHeight = 13.sp)
+        Spacer(Modifier.height(3.dp))
+        Text(label, color = if (selected) L.text else L.muted, fontSize = 11.sp, maxLines = 1, lineHeight = 13.sp)
     }
 }
 
@@ -74,17 +78,38 @@ private fun IconChoice(label: String, icon: ImageVector, selected: Boolean, onCl
 @Composable
 private fun PersonChoice(name: String, file: String, selected: Boolean, onClick: () -> Unit) {
     Column(
-        Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 6.dp),
+        Modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.padding(3.dp).size(52.dp).clip(RoundedCornerShape(17.dp))
-                .background(if (selected) L.accent.copy(alpha = 0.14f) else L.bg)
-                .border(1.dp, if (selected) L.accent else L.border, RoundedCornerShape(17.dp)),
+            Modifier.padding(3.dp).size(50.dp).clip(RoundedCornerShape(16.dp))
+                .background(if (selected) L.accent.copy(alpha = 0.16f) else L.bg)
+                .border(1.dp, if (selected) L.accent else L.border, RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
-        ) { Avatar(name, file, size = 44) }
-        Spacer(Modifier.height(4.dp))
-        Text(name, color = if (selected) L.text else L.muted, fontSize = 11.sp, maxLines = 2, lineHeight = 13.sp)
+        ) {
+            Avatar(name, file, size = 42)
+            if (selected) Text("✓", color = L.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopEnd).padding(3.dp))
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(name, color = if (selected) L.text else L.muted, fontSize = 11.sp, maxLines = 1, lineHeight = 13.sp)
+    }
+}
+
+/** Merchant tiles are plain rectangles: names are text, so an icon would make them all look alike. */
+@Composable
+private fun MerchantChoice(name: String, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(14.dp)
+    Box(
+        Modifier.width(92.dp).height(48.dp).clip(shape).tactile(onClick)
+            .background(if (selected) L.accent.copy(alpha = 0.16f) else L.bg)
+            .border(1.dp, if (selected) L.accent else L.border, shape),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(name, color = if (selected) L.text else L.muted, fontSize = 12.sp, maxLines = 2,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 14.sp)
+        if (selected) Text("✓", color = L.accent, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.TopEnd).padding(3.dp))
     }
 }
 
@@ -197,7 +222,7 @@ private fun Receipt(items: MutableList<LineItem>, adjs: MutableList<Adj>, subtot
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditTransactionSheet(
-    d: Draft, accounts: List<Account>, heads: List<Category>, usage: Map<String, Int>, likely: (String) -> List<String>,
+    d: Draft, accounts: List<Account>, heads: List<Category>, usage: Map<String, Int>,
     recents: List<Txn>, merchantNames: List<String>, lookup: (String) -> Txn?,
     people: List<Person>, groups: List<OccasionGroup>, groupMembers: List<GroupMember>, trips: List<Trip>,
     lastTrip: () -> Txn?, places: () -> List<String>, routes: () -> List<Pair<String, String>>,
@@ -255,13 +280,11 @@ fun AddEditTransactionSheet(
     val headNames = heads.filter { it.kind == kind }.map { it.name }
     val order = if (kind == "INCOME") DEFAULT_INCOME_CATEGORIES else DEFAULT_EXPENSE_CATEGORIES
     val baseQuick = remember(kind, heads, usage) {
-        val l = likely(kind).filter { it in headNames }
-        val byUse = headNames.sortedWith(
+        headNames.sortedWith(
             compareByDescending<String> { usage["$kind|$it"] ?: 0 }.thenBy { order.indexOf(it).let { i -> if (i < 0) 999 else i } }
         )
-        (l + byUse).distinct()
     }
-    val quick = baseQuick.take(4)   // suggestions stay in their normal order; the picked head gets its own stable chip
+    val quick = baseQuick.take(4)   // most used stays in its normal place; the picked head is shown in the label
     val topMerchants = remember(merchantNames) { merchantNames.take(12) }
     val merchantRow = ((if (merchant.isNotBlank()) listOf(merchant.trim()) else emptyList()) + topMerchants).distinct().take(4)
     fun accLabel(a: Account) = if (a.archived) "${a.name} (archived)" else a.name
@@ -304,32 +327,20 @@ fun AddEditTransactionSheet(
     ) {
         Column(
             Modifier.verticalScroll(rememberScrollState()).imePadding()
-                .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when (type) { "INCOME" -> if (isNew) "Add income" else "Edit income"; "TRANSFER" -> "Transfer"; else -> if (isNew) "Add expense" else "Edit expense" },
-                    color = L.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold
+                    color = L.text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
                 )
-                Text(
-                    when {
-                        !isNew -> "Change only what you need."
-                        type == "TRANSFER" -> "Between your own accounts."
-                        category.isNotBlank() -> "Head picked — now add the amount and details."
-                        else -> "Add the details below."
-                    },
-                    color = L.muted, fontSize = 12.sp, lineHeight = 17.sp
-                )
-            }
-            Hairline()
-            if (!isNew && d.original != null) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    IconButton(onClick = {
-                        d.original?.let(onDelete)
-                        onDismiss()
-                    }) { Icon(Icons.Rounded.Delete, contentDescription = "Delete transaction", tint = L.red) }
-                }
+                InfoTip("A head groups the entry. Transfers only move money between your own accounts.")
+                if (!isNew && d.original != null) IconButton(onClick = {
+                    d.original?.let(onDelete)
+                    onDismiss()
+                }) { Icon(Icons.Rounded.Delete, contentDescription = "Delete transaction", tint = L.red) }
             }
             // ---- what kind of entry: plain words, no + / − guessing
             val shape = RoundedCornerShape(16.dp)
@@ -343,12 +354,11 @@ fun AddEditTransactionSheet(
                                 val nk = if (k == "INCOME") "INCOME" else "EXPENSE"
                                 val names = heads.filter { it.kind == nk }.map { it.name }
                                 if (category !in names) { category = ""; catTouched = false }
-                            }.padding(vertical = 11.dp),
+                            }.padding(vertical = 9.dp),
                         contentAlignment = Alignment.Center
-                    ) { Text(label, color = if (sel) L.onAccent else L.text, fontSize = 14.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal) }
+                    ) { Text(label, color = if (sel) L.onAccent else L.text, fontSize = 13.sp, fontWeight = if (sel) FontWeight.Medium else FontWeight.Normal) }
                 }
             }
-            if (type == "TRANSFER") Text("Between your own accounts. Not counted as spending.", color = L.muted, fontSize = 12.sp)
 
             // ---- amount: the normal number pad
             Column {
@@ -366,15 +376,15 @@ fun AddEditTransactionSheet(
                 }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(signText + "₹", color = signColor, fontSize = 40.sp, fontWeight = FontWeight.Light)
-                    if (itemized) Num(fmtAmt(itemTotal), size = 48.sp, weight = FontWeight.Light)
+                    Text(signText + "₹", color = signColor, fontSize = 38.sp, fontWeight = FontWeight.Light)
+                    if (itemized) Num(fmtAmt(itemTotal), size = 44.sp, weight = FontWeight.Light)
                     else BasicTextField(
                         amount, { amount = cleanAmount(it) }, singleLine = true,
-                        textStyle = TextStyle(color = L.text, fontSize = 48.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum"),
+                        textStyle = TextStyle(color = L.text, fontSize = 44.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum"),
                         cursorBrush = SolidColor(L.text),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
                         modifier = Modifier.weight(1f).focusRequester(focus),
-                        decorationBox = { inner -> Box { if (amount.isEmpty()) Text("0", color = L.muted.copy(alpha = 0.5f), fontSize = 48.sp, fontWeight = FontWeight.Light); inner() } }
+                        decorationBox = { inner -> Box { if (amount.isEmpty()) Text("0", color = L.muted.copy(alpha = 0.5f), fontSize = 44.sp, fontWeight = FontWeight.Light); inner() } }
                     )
                 }
                 Hairline()
@@ -395,36 +405,34 @@ fun AddEditTransactionSheet(
             }
 
             if (type != "TRANSFER") {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Cap("Head")
-                        Cap(category.ifBlank { "Required" }, color = if (category.isBlank()) L.red else L.text)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        CapInfo("Head", "A head is this entry’s category. + adds a new one.", color = L.text)
+                        Cap(category.ifBlank { "Pick one" }, color = if (category.isBlank()) L.red else L.text)
                     }
                     HeadStrip(quick, category, onPick = { category = it; catTouched = true }, onNew = { newHead = true }, onMore = { showHeads = true })
                 }
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Cap("Merchant")
-                    Cap(merchant.ifBlank { "Optional" }, color = if (merchant.isBlank()) L.muted else L.text)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    CapInfo("Merchant", "Where you paid. Optional.", color = L.text)
+                    Cap(merchant.ifBlank { "Skip" }, color = if (merchant.isBlank()) L.muted else L.text)
                 }
                 if (newMerchant) {
-                    Field("New merchant", merchant, ::onMerchant)
+                    Field("Merchant", merchant, ::onMerchant)
                     val matches = if (isNew && merchant.isNotBlank())
                         merchantNames.filter { it.contains(merchant.trim(), true) && !it.equals(merchant.trim(), true) }.take(4) else emptyList()
                     if (matches.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        matches.forEach { m -> Chip(m, false) { onMerchant(m); newMerchant = false } }
+                        matches.forEach { m -> MerchantChoice(m, false) { onMerchant(m); newMerchant = false } }
                     }
-                } else Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (merchantRow.isEmpty()) Text("No merchants yet", color = L.muted, fontSize = 13.sp)
-                        merchantRow.forEach { m ->
-                            val on = m.equals(merchant.trim(), true)
-                            Chip(m, on) { if (on) onMerchant("") else onMerchant(m) }
-                        }
+                } else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    merchantRow.forEach { m ->
+                        val on = m.equals(merchant.trim(), true)
+                        MerchantChoice(m, on) { if (on) onMerchant("") else onMerchant(m) }
                     }
-                    PinnedPair({ newMerchant = true }, { showMerchants = true }, 44.dp)
+                    MerchantChoice("+ New", false) { newMerchant = true }
+                    MerchantChoice("All", false) { showMerchants = true }
                 }
             }
 
@@ -434,12 +442,13 @@ fun AddEditTransactionSheet(
                 Picker("To", accName(toId), accOptions, { toId = it }, Modifier.weight(1f))
             }
 
-            Cap(
-                if (showMore) "Hide details" else "More details · people, groups, trip, date",
-                Modifier.clickable { showMore = !showMore }.padding(vertical = 4.dp), color = L.text
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Cap(if (showMore) "Less" else "More",
+                    Modifier.clickable { showMore = !showMore }.padding(vertical = 4.dp), color = L.text)
+                InfoTip("People, groups, owed, route, date, tag, trip and repeat.")
+            }
             if (showMore) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // People and occasion groups share one row of tiles. A group only narrows
                     // the people shown; it never becomes a head or changes the chosen head.
                     if (type == "EXPENSE") {
@@ -447,39 +456,36 @@ fun AddEditTransactionSheet(
                         val shownPeople = if (groupFilter == 0L) people else
                             (people.filter { p -> groupMembers.any { m -> m.groupId == groupFilter && m.personId == p.id } }
                                 + listOfNotNull(selectedPerson)).distinctBy { it.id }
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Cap("Who was this for?", color = L.text)
-                            if (groups.isNotEmpty()) Text(
-                                "Tap a group to narrow people. The head stays the same.",
-                                color = L.muted, fontSize = 11.sp, lineHeight = 15.sp
-                            )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CapInfo("For", "A group only filters people. The head stays the same.", color = L.text)
                             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                IconChoice("Just me", Icons.Rounded.Person, personId == 0L && groupFilter == 0L) {
+                                IconChoice("Me", Icons.Rounded.Person, personId == 0L && groupFilter == 0L) {
                                     personId = 0; groupFilter = 0
                                 }
                                 groups.forEach { g ->
-                                    IconChoice(g.name, Icons.Rounded.Group, groupFilter == g.id) {
+                                    IconChoice(g.name, Icons.Rounded.Group, groupFilter == g.id,
+                                        badge = groupMembers.count { it.groupId == g.id }.takeIf { it > 0 }?.toString()) {
                                         groupFilter = if (groupFilter == g.id) 0L else g.id
                                     }
                                 }
                                 shownPeople.forEach { p ->
                                     PersonChoice(p.name, p.photoUri, personId == p.id) { personId = p.id }
                                 }
-                                IconChoice("+ Person", Icons.Rounded.Add, false) { groupFilter = 0; addingPerson = true }
+                                IconChoice("+", Icons.Rounded.Add, false) { groupFilter = 0; addingPerson = true }
                             }
                             if (personId != 0L) {
-                                Cap("How it counts", color = L.text)
+                                CapInfo("Owed", "Note = no debt. Split = your share. Paid = they owe all.", color = L.text)
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    IconChoice("Just note", Icons.Rounded.Receipt, split == "TAG") { split = "TAG" }
+                                    IconChoice("Note", Icons.Rounded.Receipt, split == "TAG") { split = "TAG" }
                                     IconChoice("Split", Icons.Rounded.SwapHoriz, split == "SPLIT") { split = "SPLIT" }
-                                    IconChoice("I paid all", Icons.Rounded.Payments, split == "FULL") { split = "FULL" }
+                                    IconChoice("Paid", Icons.Rounded.Payments, split == "FULL") { split = "FULL" }
                                 }
                                 val tv = totalValue ?: 0.0
                                 Text(
                                     when (split) {
-                                        "SPLIT" -> "$personName owes you ${inr(shareValue)}"
-                                        "FULL" -> "$personName owes you ${inr(tv)}"
-                                        else -> "Noted only. Nothing owed."
+                                        "SPLIT" -> "$personName owes ${inr(shareValue)}"
+                                        "FULL" -> "$personName owes ${inr(tv)}"
+                                        else -> "No debt"
                                     },
                                     color = L.muted, fontSize = 12.sp, lineHeight = 17.sp
                                 )
@@ -494,10 +500,10 @@ fun AddEditTransactionSheet(
                         val last = remember { lastTrip() }
                         val usual = remember { routes() }
                         val known = remember { places() }
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Cap("Travel route", color = L.text)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CapInfo("Route", "Optional travel detail for transport heads.", color = L.text)
                             if (isNew && last != null && routeFrom.isBlank() && routeTo.isBlank()) {
-                                Text("Your last trip was ${last.routeFrom} → ${last.routeTo}. Is this…", color = L.muted, fontSize = 13.sp)
+                                Text("Last: ${last.routeFrom} → ${last.routeTo}", color = L.muted, fontSize = 12.sp)
                                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Chip("↩ Return trip", false) { routeFrom = last.routeTo; routeTo = last.routeFrom }
                                     Chip("→ Continuing from ${last.routeTo}", false) { routeFrom = last.routeTo; editingTo = true }
@@ -528,14 +534,14 @@ fun AddEditTransactionSheet(
                         )
                         Hairline()
                     }
-                    if (type != "TRANSFER") Field("Tag (e.g. personal)", tag, { tag = it.replace("#", "") })
+                    if (type != "TRANSFER") Field("Tag", tag, { tag = it.replace("#", "") })
                     if (type != "TRANSFER" && trips.isNotEmpty()) Picker(
-                        "Trip (optional)",
+                        "Trip",
                         trips.firstOrNull { it.id == tripId }?.name ?: "Not part of a trip",
                         listOf("Not part of a trip" to 0L) + trips.map { it.name to it.id },
                         { tripId = it }
                     )
-                    if (type == "EXPENSE") SwitchRow("Leave out of monthly budget", exclude) { exclude = it }
+                    if (type == "EXPENSE") SwitchRow("Exclude from budget", exclude) { exclude = it }
                     if (isNew) Picker(
                         "Repeat",
                         listOf("NEVER" to "Never", "DAILY" to "Daily", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly", "YEARLY" to "Yearly").first { it.first == repeat }.second,
@@ -594,7 +600,7 @@ fun AddEditTransactionSheet(
     }
 
     if (showHeads) HeadsSheet(
-        heads = heads, initialKind = kind, selected = category, usage = usage, likely = likely, showKindSwitch = false,
+        heads = heads, initialKind = kind, selected = category, usage = usage, showKindSwitch = false,
         onPick = { n, _ -> category = n; catTouched = true; showHeads = false },
         onCreate = { n, k, ic -> onAddHead(n, k, ic); category = n; catTouched = true; showHeads = false },
         onDismiss = { showHeads = false }

@@ -7,8 +7,19 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-/** Most common first: the quick row shows the first four until you have your own history. */
+/** Broader defaults, most common first: specific details belong in a tag or custom head, not more overlapping heads. */
 val DEFAULT_EXPENSE_CATEGORIES = listOf(
+    "Food & Dining", "Groceries", "Local transport", "Trips & travel",
+    "Bills & utilities", "Home & rent", "Shopping", "Personal care",
+    "Health", "Entertainment", "Subscriptions", "Education",
+    "Gifts & Donations", "Family & kids", "Pets", "Investments", "Other"
+)
+val DEFAULT_INCOME_CATEGORIES = listOf(
+    "Salary", "Stipend", "Pocket Money", "Freelance", "Refunds", "Cashback", "Interest", "Dividends", "Rent Received", "Gifts", "Other"
+)
+
+/** Frozen old list: historical migrations must keep behaving as they did when shipped. */
+private val LEGACY_EXPENSE_CATEGORIES = listOf(
     "Food & Dining", "Groceries", "Auto & Transport", "Bills & Utilities",
     "Coffee & Snacks", "Vegetables & Fruits", "Milk & Dairy", "Gas & Fuel", "Travel",
     "Mobile Recharge", "Phone & Internet", "Electricity", "Water", "Gas Cylinder", "Rent", "EMI & Loans",
@@ -17,19 +28,16 @@ val DEFAULT_EXPENSE_CATEGORIES = listOf(
     "Education", "Books", "Stationery", "Home & Repairs", "Gifts & Donations", "Family & Kids", "Pets",
     "Investments", "Taxes & Fees", "Bank Charges", "Other"
 )
-val DEFAULT_INCOME_CATEGORIES = listOf(
-    "Salary", "Stipend", "Pocket Money", "Freelance", "Refunds", "Cashback", "Interest", "Dividends", "Rent Received", "Gifts", "Other"
-)
 
 /** Used in v1->2, before the icon column exists. */
-private fun seedCategories(db: SupportSQLiteDatabase) {
-    DEFAULT_EXPENSE_CATEGORIES.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'EXPENSE')", arrayOf<Any>(it)) }
+private fun seedCategories(db: SupportSQLiteDatabase, expense: List<String> = DEFAULT_EXPENSE_CATEGORIES) {
+    expense.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'EXPENSE')", arrayOf<Any>(it)) }
     DEFAULT_INCOME_CATEGORIES.forEach { db.execSQL("INSERT OR IGNORE INTO categories(name,kind) VALUES(?, 'INCOME')", arrayOf<Any>(it)) }
 }
 
 /** Used from v6 onward: adds heads and fills icons only where the user has not chosen one. */
-private fun seedCategoriesWithIcons(db: SupportSQLiteDatabase) {
-    DEFAULT_EXPENSE_CATEGORIES.forEach { name ->
+private fun seedCategoriesWithIcons(db: SupportSQLiteDatabase, expense: List<String> = DEFAULT_EXPENSE_CATEGORIES) {
+    expense.forEach { name ->
         db.execSQL("INSERT OR IGNORE INTO categories(name,kind,icon) VALUES(?, 'EXPENSE', ?)", arrayOf<Any>(name, defaultHeadIcon(name, "EXPENSE")))
         db.execSQL("UPDATE categories SET icon=? WHERE name=? AND kind='EXPENSE' AND icon=''", arrayOf<Any>(defaultHeadIcon(name, "EXPENSE"), name))
     }
@@ -40,8 +48,8 @@ private fun seedCategoriesWithIcons(db: SupportSQLiteDatabase) {
 }
 
 /** Known heads get their familiar order; custom heads keep the row order already assigned. */
-private fun assignHeadOrder(db: SupportSQLiteDatabase) {
-    DEFAULT_EXPENSE_CATEGORIES.forEachIndexed { i, name ->
+private fun assignHeadOrder(db: SupportSQLiteDatabase, expense: List<String> = DEFAULT_EXPENSE_CATEGORIES) {
+    expense.forEachIndexed { i, name ->
         db.execSQL("UPDATE categories SET sortOrder=? WHERE name=? AND kind='EXPENSE'", arrayOf<Any>(i, name))
     }
     DEFAULT_INCOME_CATEGORIES.forEachIndexed { i, name ->
@@ -55,7 +63,7 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `recurring` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `amount` REAL NOT NULL, `merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `category` TEXT NOT NULL, `accountId` INTEGER NOT NULL, `toAccountId` INTEGER, `tag` TEXT NOT NULL, `excludeFromBudget` INTEGER NOT NULL, `freq` TEXT NOT NULL, `nextDue` INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS `categories` (`name` TEXT NOT NULL, `kind` TEXT NOT NULL, PRIMARY KEY(`name`, `kind`))")
         db.execSQL("CREATE TABLE IF NOT EXISTS `daymarks` (`date` INTEGER NOT NULL, PRIMARY KEY(`date`))")
-        seedCategories(db)
+        seedCategories(db, LEGACY_EXPENSE_CATEGORIES)
         db.execSQL("INSERT OR IGNORE INTO categories(name,kind) SELECT DISTINCT category,'EXPENSE' FROM transactions WHERE type='EXPENSE'")
         db.execSQL("INSERT OR IGNORE INTO categories(name,kind) SELECT DISTINCT category,'INCOME' FROM transactions WHERE type='INCOME'")
     }
@@ -88,7 +96,7 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         db.execSQL("ALTER TABLE persons ADD COLUMN relation TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE persons ADD COLUMN phone TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE persons ADD COLUMN note TEXT NOT NULL DEFAULT ''")
-        seedCategories(db)
+        seedCategories(db, LEGACY_EXPENSE_CATEGORIES)
     }
 }
 
@@ -104,7 +112,7 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("UPDATE accounts SET type='BANK' WHERE type='ASSET'")
         db.execSQL("CREATE TABLE IF NOT EXISTS `deleted_txns` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `amount` REAL NOT NULL, `merchant` TEXT NOT NULL, `note` TEXT NOT NULL, `date` INTEGER NOT NULL, `category` TEXT NOT NULL, `accountId` INTEGER NOT NULL, `toAccountId` INTEGER, `tag` TEXT NOT NULL, `excludeFromBudget` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `personId` INTEGER NOT NULL, `owed` REAL NOT NULL, `routeFrom` TEXT NOT NULL, `routeTo` TEXT NOT NULL, `items` TEXT NOT NULL, `deletedAt` INTEGER NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS `change_history` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `entity` TEXT NOT NULL, `entityId` INTEGER NOT NULL, `action` TEXT NOT NULL, `payload` TEXT NOT NULL, `changedAt` INTEGER NOT NULL)")
-        seedCategoriesWithIcons(db)
+        seedCategoriesWithIcons(db, LEGACY_EXPENSE_CATEGORIES)
     }
 }
 
@@ -135,7 +143,7 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("ALTER TABLE categories ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE categories ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0")
         db.execSQL("UPDATE categories SET sortOrder = rowid")
-        assignHeadOrder(db)
+        assignHeadOrder(db, LEGACY_EXPENSE_CATEGORIES)
     }
 }
 

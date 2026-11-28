@@ -13,9 +13,12 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -121,6 +124,31 @@ fun Cap(t: String, modifier: Modifier = Modifier, color: Color = L.muted) =
 fun Num(t: String, modifier: Modifier = Modifier, size: TextUnit = 15.sp, color: Color = L.text, weight: FontWeight = FontWeight.Normal) =
     Text(t, modifier, color = color, style = TextStyle(fontSize = size, fontWeight = weight, fontFeatureSettings = "tnum"))
 
+/** Small info button: keeps headings clean and reveals the detail only when asked. */
+@Composable
+fun InfoTip(text: String, modifier: Modifier = Modifier) {
+    var open by remember { mutableStateOf(false) }
+    Box(
+        modifier.size(20.dp).clip(CircleShape).tactile { open = true },
+        contentAlignment = Alignment.Center
+    ) { Icon(Icons.Rounded.Info, contentDescription = "Info", tint = L.muted, modifier = Modifier.size(14.dp)) }
+    if (open) AlertDialog(
+        onDismissRequest = { open = false }, containerColor = L.surface, shape = RoundedCornerShape(14.dp),
+        title = { Cap("Info", color = L.text) },
+        text = { Text(text, color = L.muted, fontSize = 13.sp, lineHeight = 19.sp) },
+        confirmButton = { TextButton({ open = false }) { Text("OK") } }
+    )
+}
+
+/** Heading plus an optional info button, one compact line. */
+@Composable
+fun CapInfo(label: String, info: String?, modifier: Modifier = Modifier, color: Color = L.muted) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Cap(label, color = color)
+        if (info != null) InfoTip(info)
+    }
+}
+
 @Composable
 fun Hairline(modifier: Modifier = Modifier) =
     Box(modifier.fillMaxWidth().height(1.dp).background(L.border))
@@ -173,8 +201,8 @@ fun Chip(t: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = L.text, fontSize = 14.sp)
         Switch(
             checked, onChange,

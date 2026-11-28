@@ -332,11 +332,11 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
 
     if (rare) AlertDialog(
         onDismissRequest = { rare = false }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
-        title = { Cap("Rare actions", color = L.text) },
+        title = {
+            CapInfo("Rare actions", "Occasion groups stay out of the daily flow. Removing a group keeps its ledger entries.", color = L.text)
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Occasion groups stay out of the daily flow. Removing a group keeps its ledger entries.",
-                    color = L.muted, fontSize = 12.sp, lineHeight = 17.sp)
                 groups.forEach { g ->
                     val names = groupMembers.filter { it.groupId == g.id }
                         .mapNotNull { m -> people.firstOrNull { it.id == m.personId }?.name }
@@ -371,12 +371,12 @@ fun PeopleView(vm: MainViewModel, modifier: Modifier = Modifier) {
         val settleAccId = accs.firstOrNull { it.isDefault }?.id ?: accs.firstOrNull()?.id ?: 0L
         AlertDialog(
             onDismissRequest = { openGroupId = 0 }, containerColor = L.surface, shape = RoundedCornerShape(20.dp),
-            title = { Cap(openGroup.name, color = L.text) },
+            title = {
+                CapInfo(openGroup.name, "Everyone’s share is shown here. Only debts involving you appear on person pages.", color = L.text)
+            },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (openGroup.note.isNotBlank()) Text(openGroup.note, color = L.muted, fontSize = 12.sp)
-                    Text("Everyone’s share is shown here. Only debts between you and someone else appear on their person page.",
-                        color = L.muted, fontSize = 11.sp, lineHeight = 16.sp)
                     if (groupSettleError.isNotBlank()) Text(groupSettleError, color = L.red, fontSize = 12.sp)
                     if (debts.isEmpty()) Text("No debts recorded.", color = L.muted, fontSize = 13.sp)
                     debts.forEach { d ->
@@ -558,7 +558,7 @@ private fun GroupDialog(
                 if (error.isNotBlank()) Text(error, color = L.red, fontSize = 12.sp)
                 Field("Occasion", name, { name = it.take(60) })
                 Field("Total amount", amount, { amount = it.filter { c -> c.isDigit() || c == '.' }.take(10) }, kb = KeyboardType.Decimal)
-                Cap("Who was there")
+                CapInfo("Who was there", "You are always included.", color = L.text)
                 if (people.isEmpty()) Text("Add people first.", color = L.muted, fontSize = 13.sp)
                 else {
                     val rows = people.chunked(4)
@@ -579,13 +579,12 @@ private fun GroupDialog(
                         }
                     }
                 }
-                Cap("Split")
+                CapInfo("Split", "Enter parts, not percentages.", color = L.text)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip("Equal", mode == "EQUAL") { mode = "EQUAL" }
                     Chip("Custom", mode == "CUSTOM") { mode = "CUSTOM" }
                 }
                 if (mode == "CUSTOM") {
-                    Text("Enter parts, not percentages. You is always included.", color = L.muted, fontSize = 11.sp)
                     participants.forEach { id ->
                         val label = if (id == 0L) "You" else people.firstOrNull { it.id == id }?.name ?: "Person"
                         Field(label, weights[id] ?: "1", { weights = weights + (id to it.filter { c -> c.isDigit() || c == '.' }.take(6)) },

@@ -360,14 +360,15 @@ private fun Shell(vm: MainViewModel, onConfirm: (String, () -> Unit) -> Unit) {
             val kind = if (first.type == "INCOME") "INCOME" else "EXPENSE"
             HeadsSheet(
                 heads = heads, initialKind = kind, selected = null, usage = usage,
-                likely = { vm.likely(it) }, showKindSwitch = false,
-                label = "New entry", hint = "Pick a head first — amount and details come next.",
+                showKindSwitch = false,
+                label = "New entry", hint = "Pick a head, then type the details yourself.",
                 onPick = { name, k -> vm.pickHead(name, k) },
+                onCreate = { n, k, ic -> vm.addHead(n, k, ic, done = { vm.pickHead(n, k) }) },
                 onDismiss = { vm.cancelHeadFirst() }
             )
         } ?: draft?.let { d ->
             AddEditTransactionSheet(
-                d, accs, heads, usage, likely = { vm.likely(it) }, recents = recents, merchantNames = merchants,
+                d, accs, heads, usage, recents = recents, merchantNames = merchants,
                 lookup = { vm.lookup(it) },
                 people = people, groups = groups, groupMembers = groupMembers, trips = trips,
                 lastTrip = { vm.lastTrip() }, places = { vm.places() }, routes = { vm.usualRoutes() },

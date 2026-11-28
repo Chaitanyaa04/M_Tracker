@@ -44,11 +44,9 @@ fun MonthPlan(vm: MainViewModel, modifier: Modifier = Modifier) {
     LazyColumn(modifier.fillMaxSize()) {
         item {
             Column(Modifier.padding(24.dp, 12.dp, 24.dp, 16.dp)) {
-                Cap("Counted spend this month")
+                CapInfo("Counted this month", "The tick on each bar is an even pace. Caps reset on the 1st.", color = L.text)
                 Spacer(Modifier.height(6.dp))
                 Num(inr(total), size = 46.sp, weight = FontWeight.Light)
-                Spacer(Modifier.height(4.dp))
-                Text("The small tick on each bar is where you’d be if you spent evenly through the month. Caps reset on the 1st.", color = L.muted, fontSize = 12.sp, lineHeight = 17.sp)
             }
             Hairline()
         }
@@ -59,7 +57,7 @@ fun MonthPlan(vm: MainViewModel, modifier: Modifier = Modifier) {
     }
 
     if (picking) HeadsSheet(
-        heads = heads, initialKind = "EXPENSE", selected = null, usage = usage, likely = { vm.likely(it) }, showKindSwitch = false,
+        heads = heads, initialKind = "EXPENSE", selected = null, usage = usage, showKindSwitch = false,
         onPick = { n, _ -> picking = false; edit = n },
         onCreate = { n, k, ic -> vm.addHead(n, k, ic); picking = false; edit = n },
         onDismiss = { picking = false }
@@ -184,7 +182,7 @@ fun DayPlan(vm: MainViewModel, modifier: Modifier = Modifier) {
     }
 
     if (picking) HeadsSheet(
-        heads = heads, initialKind = "EXPENSE", selected = null, usage = usage, likely = { vm.likely(it) }, showKindSwitch = false,
+        heads = heads, initialKind = "EXPENSE", selected = null, usage = usage, showKindSwitch = false,
         onPick = { n, _ -> picking = false; edit = n },
         onCreate = { n, k, ic -> vm.addHead(n, k, ic); picking = false; edit = n },
         onDismiss = { picking = false }
